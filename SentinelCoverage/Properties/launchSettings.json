@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "SentinelCoverage": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}

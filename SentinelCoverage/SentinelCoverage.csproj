@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk;Microsoft.NET.Sdk.Publish">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <UserSecretsId>08f33a6f-4d4f-4fac-b416-b72dc4ae461c</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <Platforms>AnyCPU;x86;x64</Platforms>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="3.7.104.30" />
+    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="MaxRev.Gdal.Core" Version="3.8.3.286" />
+    <PackageReference Include="MaxRev.Gdal.WindowsRuntime.Minimal" Version="3.8.3.259" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="7.0.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.18.0" />
+    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.18.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.4" />
+    <PackageReference Include="Spectre.Console" Version="0.47.0" />
+  </ItemGroup>
+</Project>

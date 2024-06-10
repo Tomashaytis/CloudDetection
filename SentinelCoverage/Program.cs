@@ -1,0 +1,1362 @@
+﻿using MaxRev.Gdal.Core;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using OSGeo.GDAL;
+using OSGeo.OSR;
+using Spectre.Console;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using File = System.IO.File;
+using MathNet.Numerics.Interpolation;
+
+
+namespace SentinelCoverage;
+
+internal partial class Program
+{
+    private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
+    {
+        {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
+        {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
+        {"Саратовская область", new Tuple<double, double, double, double>(42.3861, 52.9233, 50.9538, 50.2228)},
+        {"Амурская область", new Tuple<double, double, double, double>(119.301,57.188,135.698,48.513)},
+        {"Астраханская область", new Tuple<double, double, double, double>(44.8621,48.9437,50.1070,45.2097)},
+        {"Республика Дагестан", new Tuple<double, double, double, double>(45.0034, 45.0917, 48.9141, 41.0851)},
+        {"Волгоградская область", new Tuple<double, double, double, double>(41.0681, 51.3476, 47.5316, 47.3437)},
+        {"Оренбургская область", new Tuple<double, double, double, double>(50.6682, 54.4656, 61.7898, 50.3953)},
+        {"Ставропольский край", new Tuple<double, double, double, double>(40.7460, 46.1365, 45.8160, 43.7584)}
+    };
+
+    private static readonly Dictionary<string, string> UrlTemplates = new()
+    {
+        {"RGB", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.2+Saturation+0.8+Sigmoidal+RGB+25+0.35&nodata=0&collection=sentinel-2-l2a&format=png"},
+        {"RGB16", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&nodata=0&collection=sentinel-2-l2a&format=tif"},
+        {"B08", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B08&nodata=0&collection=sentinel-2-l2a&format=tif"},
+        {"NDVI", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true&expression=%28B08-B04%29%2F%28B08%2BB04%29&rescale=-1%2C1&nodata=0&collection=sentinel-2-l2a&format=png"},
+        {"LandCover9Classes", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=data&colormap_name=io-lulc-9-class&exitwhenfull=False&skipcovered=False&collection=io-lulc-annual-v02&format=png"},
+        {"ESAWorldCover", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=map&colormap_name=esa-worldcover&collection=esa-worldcover&format=png"},
+        {"RGBLandsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=red&assets=green&assets=blue&color_formula=gamma+RGB+2.7%2C+saturation+1.5%2C+sigmoidal+RGB+15+0.55&nodata=0&collection=landsat-c2-l2&format=png"},
+        {"NDVILandsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true&expression=%28nir08-red%29%2F%28nir08%2Bred%29&nodata=0&rescale=-1%2C1&collection=landsat-c2-l2&format=png"}
+    };
+
+    private static Task Main(string[] args)
+    {
+        GdalBase.ConfigureAll();
+        Osr.SetPROJSearchPath("runtimes\\win-x64\\native\\maxrev.gdal.core.libshared");
+        
+        using var session = new InferenceSession("UNet_v2.onnx");
+
+        AnsiConsole.Write(
+            new FigletText("Planetary Data")
+                .LeftJustified()
+        .Color(Spectre.Console.Color.Blue));
+
+        AnsiConsole.Write(new Rule("[yellow]Область для загрузки данных[/]").RuleStyle("grey").LeftJustified());
+        var region = args.Length == 0 ? AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Область для загрузки")
+                .AddChoices(Regions.Keys)) : args[0];
+        var lonMin = Regions[region].Item1;
+        var latMax = Regions[region].Item2;
+        var lonMax = Regions[region].Item3;
+        var latMin = Regions[region].Item4;
+
+        var zoom = args.Length == 0 ? AnsiConsole.Ask("Масштабный уровень: ", 10) : int.Parse(args[1]);
+
+        AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
+        var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2023-06-01") : args[2];
+        var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2023-09-01") : args[3];
+        var clouds = args.Length == 0 ? AnsiConsole.Ask("Облачность: ", 30) : int.Parse(args[4]);
+
+        var enableCloudDetection = args.Length == 0 ? AnsiConsole.Confirm("Обнаружение облачности: ", true) : args[5] == "y";
+        var enableComplexCloudDetection = args.Length == 0 ? AnsiConsole.Confirm("Высокое качество обнаружения облачности: ", true) : args[6] == "y";
+        var enableHistMatch = args.Length == 0 ? AnsiConsole.Confirm("Сопоставление гистограмм: ", false) : args[7] == "y";
+
+        var startDate = DateTime.Parse(startDateString);
+        var endDate = DateTime.Parse(endDateString);
+
+        var dataType = args.Length == 0 ? AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Тип данных")
+                .AddChoices(UrlTemplates.Keys)) : args[8];
+
+        enableCloudDetection = enableCloudDetection && dataType is "RGB" or "NDVI" or "B08" or "RGB16";
+        double cloudPercentLimit = 0.001;
+
+        AnsiConsole.WriteLine(region);
+        AnsiConsole.WriteLine(dataType);
+
+        var urlTemplate = UrlTemplates[dataType];
+        if (dataType == "RGB" && startDate.Year < 2022)
+            urlTemplate = "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.7+Saturation+1.5+Sigmoidal+RGB+15+0.35&nodata=0&collection=sentinel-2-l2a&format=png";
+
+        var bandsCount = 4;
+        if (dataType is "NDVI" or "NDVILandsat" or "B08")
+            bandsCount = 2;
+
+        var planetaryComputerKey = GetPlanetaryComputerKey(dataType, startDate, endDate, clouds).Result;
+
+        (double x, double y) latLon1 = (lonMin, latMax);
+        (double x, double y) latLon2 = (lonMax, latMin);
+
+        var tileSize = 512;
+        var meters1 = WebMercatorHandler.LatLonToMeters(latLon1.y, latLon1.x);
+        var meters2 = WebMercatorHandler.LatLonToMeters(latLon2.y, latLon2.x);
+        var xMin = (int)(WebMercatorHandler.FromMetersToPixels(meters1, zoom).x / tileSize);
+        var xMax = (int)(WebMercatorHandler.FromMetersToPixels(meters2, zoom).x / tileSize);
+        var yMin = (int)Math.Pow(2, zoom) - (int)(WebMercatorHandler.FromMetersToPixels(meters1, zoom).y / tileSize);
+        var yMax = (int)Math.Pow(2, zoom) - (int)(WebMercatorHandler.FromMetersToPixels(meters2, zoom).y / tileSize);
+
+        var resHorSize = (xMax - xMin + 1) * tileSize;
+        var resVerSize = (yMax - yMin + 1) * tileSize;
+
+        var resFileName = $"{dataType}.tif";
+
+        var startPoint =
+            WebMercatorHandler.FromPixelsToMeters((xMin * tileSize, ((int)Math.Pow(2, zoom) - yMin) * tileSize), zoom);
+        var resolution = WebMercatorHandler.Resolution(zoom);
+
+        var cloudTiles = new List<Tuple<int, int>>();
+        var clearTiles = new List<Tuple<int, int>>();
+
+        if (enableCloudDetection)
+        {
+            GdalBase.ConfigureAll();
+            Gdal.AllRegister();
+            var geoTiffDriver = Gdal.GetDriverByName("GTiff");
+            var bands = Enumerable.Range(1, 5).ToArray();
+
+            var processed = 0;
+            var total = (xMax - xMin + 1) * (yMax - yMin + 1);
+
+            AnsiConsole.Progress()
+                .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
+                    new RemainingTimeColumn(), new SpinnerColumn())
+                .Start(ctx =>
+                {
+                    var downloadTask = ctx.AddTask("[green]Проверяем облачность[/]");
+                    downloadTask.MaxValue = total;
+
+                    for (var y = yMin; y <= yMax; y++)
+                    {
+                        var tiles = new List<int>();
+                        for (var x = xMin; x <= xMax; x++)
+                        {
+                            tiles.Add(x);
+                        }
+
+                        var y1 = y;
+                        _ = Parallel.ForEach(tiles, (x, _) =>
+                        {
+                            var input1 = new DenseTensor<float>([1, 3, 512, 512]);
+                            var input2 = enableComplexCloudDetection ? new DenseTensor<float>([1, 3, 512, 512]) : null;
+                            var url = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, x, y1);
+                            try
+                            {
+                                var filePath = $"{x}_{y1}.tif";
+                                DownloadFileAsync(url, filePath).Wait();
+                                if (File.Exists(filePath))
+                                {
+                                    var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                    var tileData = new int[4 * tileSize * tileSize];
+                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, 4, bands, 0, 0, 0);
+                                    tile.Dispose();
+                                    File.Delete(filePath);
+                                    for (var k = 0; k < 3; k++)
+                                        for (var i = 0; i < tileSize; i++)
+                                            for (var j = 0; j < tileSize; j++)
+                                            {
+                                                var index = i * tileSize + j + k * tileSize * tileSize;
+                                                input1[0, k, i, j] = Math.Abs(Convert.ToSingle((tileData[index] - 1175) / 0.25));
+                                                if (enableComplexCloudDetection)
+                                                    input2[0, k, i, j] = Math.Abs(Convert.ToSingle(tileData[index] / 0.25));
+                                            }
+
+                                    double cloudPercent = GetCloudPercent(session, tileSize, input1, input2, enableComplexCloudDetection);
+                                    if (cloudPercent > cloudPercentLimit)
+                                        cloudTiles.Add(new Tuple<int, int>(x, y1));
+                                    else
+                                        clearTiles.Add(new Tuple<int, int>(x, y1));
+                                }
+                            }
+                            catch (Exception err)
+                            {
+                                Console.WriteLine(err.Message);
+                            }
+                            processed++;
+                            downloadTask.Value = processed;
+                        });
+                    }
+                });
+            Console.WriteLine($"Обнаружено облачных тайлов: {cloudTiles.Count}");
+        }
+        if (dataType == "B08" || dataType == "RGB16")
+        {
+            GdalBase.ConfigureAll();
+            Gdal.AllRegister();
+            var geoTiffDriver = Gdal.GetDriverByName("GTiff");
+            File.Delete(resFileName);
+            var mosaicRgb = geoTiffDriver.Create(resFileName, resHorSize, resVerSize, bandsCount, DataType.GDT_Int16, null);
+            mosaicRgb.SetProjection(
+                "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
+            mosaicRgb.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
+            mosaicRgb.Dispose();
+            var bands = Enumerable.Range(1, bandsCount + 1).ToArray();
+            var ext = "tif";
+
+            var processed = 0;
+            var total = (xMax - xMin + 1) * (yMax - yMin + 1);
+
+            var failedTiles = new List<Tuple<int, int>>();
+            AnsiConsole.Progress()
+                .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
+                    new RemainingTimeColumn(), new SpinnerColumn())
+                .Start(ctx =>
+                {
+                    var downloadTask = ctx.AddTask("[green]Скачиваем данные[/]");
+                    downloadTask.MaxValue = total;
+
+                    for (var y = yMin; y <= yMax; y++)
+                    {
+                        mosaicRgb = Gdal.Open(resFileName, Access.GA_Update);
+
+                        var tiles = new List<int>();
+                        for (var x = xMin; x <= xMax; x++)
+                        {
+                            tiles.Add(x);
+                        }
+
+                        var buffer = new int[bandsCount * tileSize * tileSize * (xMax - xMin + 1)];
+
+                        var y1 = y;
+                        Parallel.ForEach(tiles, (x, _) =>
+                        {
+                            var url = string.Format(urlTemplate, planetaryComputerKey, zoom, x, y1);
+                            try
+                            {
+                                var filePath = $"{x}_{y1}.{ext}";
+                                DownloadFileAsync(url, filePath).Wait();
+                                var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                var tileData = new int[bandsCount * tileSize * tileSize];
+                                tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                tile.Dispose();
+                                File.Delete(filePath);
+                                bool is_cloud_tile = cloudTiles.Contains(new Tuple<int, int>(x, y1));
+                                lock (buffer)
+                                {
+                                    var shift = (x - xMin) * tileSize;
+                                    for (var k = 0; k < bandsCount; k++)
+                                        for (var i = 0; i < tileSize; i++)
+                                            for (var j = 0; j < tileSize; j++)
+                                            {
+                                                var index = i * tileSize + j + k * tileSize * tileSize;
+                                                var resIndex = i * tileSize * (xMax - xMin + 1) + j + shift + k * tileSize * tileSize * (xMax - xMin + 1);
+                                                if (k == bandsCount - 1 && is_cloud_tile)
+                                                    buffer[resIndex] = 0;
+                                                else
+                                                    buffer[resIndex] = tileData[index];
+                                            }
+                                    processed++;
+                                }
+
+                                if (tileData.All(b => b == 0))
+                                {
+                                    failedTiles.Add(new Tuple<int, int>(x, y1));
+                                }
+                            }
+                            catch (Exception)
+                            {
+                                lock (buffer)
+                                {
+                                    processed++;
+                                    failedTiles.Add(new Tuple<int, int>(x, y1));
+                                }
+                            }
+                            downloadTask.Value = processed;
+                        });
+
+                        mosaicRgb.WriteRaster(0, (y - yMin) * tileSize, tileSize * (xMax - xMin + 1), tileSize, buffer,
+                            tileSize * (xMax - xMin + 1),
+                            tileSize, bandsCount, bands, 0, 0, 0);
+                        mosaicRgb.FlushCache();
+                        mosaicRgb.Dispose();
+                    }
+                });
+            if (failedTiles.Count > 0)
+            {
+                var finallyProcessed = true;
+                Environment.Exit(0);
+                AnsiConsole.Progress()
+                    .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
+                        new RemainingTimeColumn(), new SpinnerColumn())
+                    .Start(ctx =>
+                    {
+                        processed = 0;
+                        var downloadTask = ctx.AddTask("[green]Докачиваем данные[/]");
+                        downloadTask.MaxValue = failedTiles.Count;
+
+                        mosaicRgb = Gdal.Open(resFileName, Access.GA_Update);
+
+                        foreach (var tileIndex in failedTiles)
+                        {
+                            var url = string.Format(urlTemplate, planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                            try
+                            {
+                                var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.{ext}";
+                                DownloadFileAsync(url, filePath).Wait();
+                                var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+
+                                var tileData = new byte[bandsCount * tileSize * tileSize];
+                                tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                tile.Dispose();
+                                File.Delete(filePath);
+                                mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                            }
+                            catch (Exception)
+                            {
+                                finallyProcessed = false;
+                            }
+
+                            processed++;
+                            downloadTask.Value = processed;
+                        }
+
+                        mosaicRgb.FlushCache();
+                        mosaicRgb.Dispose();
+                    });
+
+                if (!finallyProcessed)
+                    AnsiConsole.Write("Есть битые тайлы");
+            }
+            if (enableCloudDetection)
+            {
+                var finallyProcessed = true;
+                AnsiConsole.Progress()
+                   .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
+                       new RemainingTimeColumn(), new SpinnerColumn())
+                   .Start(ctx =>
+                   {
+                       processed = 0;
+                       var downloadTask = ctx.AddTask("[green]Избавляемся от облачности[/]");
+                       downloadTask.MaxValue = cloudTiles.Count;
+                       mosaicRgb = Gdal.Open(resFileName, Access.GA_Update);
+                       Parallel.ForEach(cloudTiles, (tileIndex) =>
+                       {
+                           var input1 = new DenseTensor<float>([1, 3, 512, 512]);
+                           var input2 = enableComplexCloudDetection ? new DenseTensor<float>([1, 3, 512, 512]) : null;
+                           var bandsRGB16 = Enumerable.Range(1, 5).ToArray();
+                           var urlRGB16 = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                           var url = string.Format(urlTemplate, planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                           DateTime startSearchDate = endDate;
+                           DateTime endSearchDate = endDate;
+                           try
+                           {
+                               var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
+                               DownloadFileAsync(url, filePath).Wait();
+                               if (!File.Exists(filePath))
+                                   return;
+                               var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                               var mainTileData = new int[bandsCount * tileSize * tileSize];
+                               tile.ReadRaster(0, 0, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               tile.Dispose();
+                               File.Delete(filePath);
+
+                               byte[,] mainMask = new byte[tileSize, tileSize];
+                               for (int i = 0; i < tileSize; i++)
+                               {
+                                   for (int j = 0; j < tileSize; j++)
+                                   {
+                                       mainMask[i, j] = 4;
+                                   }
+                               }
+
+                               double cloudPercent = 1;
+                               int sameMaskCount = 0;
+                               while (startSearchDate > startDate)
+                               {
+                                   try
+                                   {
+                                       startSearchDate = endSearchDate.AddDays(-5);
+                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 50).Result;
+                                       bandsRGB16 = Enumerable.Range(1, 5).ToArray();
+                                       urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                       url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       DownloadFileAsync(urlRGB16, filePath).Wait();
+                                       if (!File.Exists(filePath))
+                                       {
+                                           endSearchDate = startSearchDate.AddDays(-1);
+                                           continue;
+                                       }
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
+                                       var task = DownloadFileAsync(url, filePath);
+
+                                       for (var k = 0; k < 3; k++)
+                                           for (var i = 0; i < tileSize; i++)
+                                               for (var j = 0; j < tileSize; j++)
+                                               {
+                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                   input1[0, k, i, j] = Math.Abs(Convert.ToSingle((tmpTileDataRGB16[index] - 1175) / 0.25));
+                                                   if (enableComplexCloudDetection)
+                                                       input2[0, k, i, j] = Math.Abs(Convert.ToSingle(tmpTileDataRGB16[index] / 0.25));
+                                               }
+                                       double tmpCloudPercent;
+                                       byte[,] tmpMask = GetMask(session, tileSize, input1, input2, out tmpCloudPercent, enableComplexCloudDetection);
+                                       tmpMask = Dilate(tmpMask, 15);
+
+                                       task.Wait();
+                                       if (!File.Exists(filePath))
+                                       {
+                                           endSearchDate = startSearchDate.AddDays(-1);
+                                           continue;
+                                       }
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileData = new int[bandsCount * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+
+                                       if (tmpTileData.All(b => b == 0) || tmpCloudPercent > 50 * cloudPercentLimit)
+                                       {
+                                           endSearchDate = startSearchDate.AddDays(-1);
+                                           continue;
+                                       }
+
+                                       int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
+                                       if (tmpCloudPercent < cloudPercentLimit)
+                                       {
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                   {
+                                                       mainMask[j, j] = tmpMask[i, j];
+                                                       for (int k = 0; k < bandsCount; k++)
+                                                       {
+                                                           var index = i * tileSize + j + k * tileSize * tileSize;
+                                                           mainTileData[index] = tmpTileData[index];
+                                                       }
+                                                   }
+                                                   if (tmpMask[i, j] is 2 or 3 or 4)
+                                                       cloudPixels++;
+                                               }
+                                           }
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
+                                       }
+                                       else
+                                       {
+                                           int samePixels = 0;
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (mainMask[i, j] == tmpMask[i, j])
+                                                       samePixels++;
+                                                   if (mainMask[i, j] is 2 or 3 or 4)
+                                                   {
+                                                       if (tmpMask[i, j] == 1 && tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                       {
+                                                           mainMask[j, j] = tmpMask[i, j];
+                                                           for (int k = 0; k < bandsCount; k++)
+                                                           {
+                                                               var index = i * tileSize + j + k * tileSize * tileSize;
+                                                               mainTileData[index] = tmpTileData[index];
+                                                           }
+                                                       }
+                                                       else
+                                                           cloudPixels++;
+                                                   }
+                                               }
+                                           }
+                                           if ((double)samePixels / (tileSize * tileSize) > 0.85)
+                                               sameMaskCount++;
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
+                                       }
+                                       if (sameMaskCount == 4 || cloudPercent < cloudPercentLimit)
+                                           break;
+                                       endSearchDate = startSearchDate.AddDays(-1);
+                                   }
+                                   catch (Exception)
+                                   {
+                                       endSearchDate = startSearchDate.AddDays(-1);
+                                   }
+                               }
+
+                               mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                           }
+                           catch (Exception)
+                           {
+                               finallyProcessed = false;
+                           }
+                           if (startSearchDate > endDate)
+                               finallyProcessed = false;
+                           processed++;
+                           downloadTask.Value = processed;
+                       });
+                       mosaicRgb.FlushCache();
+                       mosaicRgb.Dispose();
+                   });
+                if (!finallyProcessed)
+                    AnsiConsole.Write("Облачные тайлы не удалось заменить полностью");
+            }
+        }
+        else
+        {
+            GdalBase.ConfigureAll();
+            Gdal.AllRegister();
+            var geoTiffDriver = Gdal.GetDriverByName("GTiff");
+            File.Delete(resFileName);
+            var mosaicRgb = geoTiffDriver.Create(resFileName, resHorSize, resVerSize, bandsCount, DataType.GDT_Byte, null);
+            mosaicRgb.SetProjection(
+                "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
+            mosaicRgb.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
+            mosaicRgb.Dispose();
+            var bands = Enumerable.Range(1, bandsCount + 1).ToArray();
+            var ext = "png";
+
+            var processed = 0;
+            var total = (xMax - xMin + 1) * (yMax - yMin + 1);
+
+            var failedTiles = new List<Tuple<int, int>>();
+            AnsiConsole.Progress()
+                .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
+                    new RemainingTimeColumn(), new SpinnerColumn())
+                .Start(ctx =>
+                {
+                    var downloadTask = ctx.AddTask("[green]Скачиваем данные[/]");
+                    downloadTask.MaxValue = total;
+
+                    for (var y = yMin; y <= yMax; y++)
+                    {
+                        mosaicRgb = Gdal.Open(resFileName, Access.GA_Update);
+
+                        var tiles = new List<int>();
+                        for (var x = xMin; x <= xMax; x++)
+                        {
+                            tiles.Add(x);
+                        }
+
+                        var buffer = new byte[bandsCount * tileSize * tileSize * (xMax - xMin + 1)];
+
+                        var y1 = y;
+                        Parallel.ForEach(tiles, (x, _) =>
+                        {
+                            var url = string.Format(urlTemplate, planetaryComputerKey, zoom, x, y1);
+                            try
+                            {
+                                var filePath = $"{x}_{y1}.{ext}";
+                                DownloadFileAsync(url, filePath).Wait();
+                                if (File.Exists(filePath))
+                                {
+                                    var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                    var tileData = new byte[bandsCount * tileSize * tileSize];
+                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                    tile.Dispose();
+                                    File.Delete(filePath);
+
+                                    bool isCloudTile = cloudTiles.Contains(new Tuple<int, int>(x, y1));
+                                    lock (buffer)
+                                    {
+                                        var shift = (x - xMin) * tileSize;
+                                        for (var k = 0; k < bandsCount; k++)
+                                            for (var i = 0; i < tileSize; i++)
+                                                for (var j = 0; j < tileSize; j++)
+                                                {
+                                                    var index = i * tileSize + j + k * tileSize * tileSize;
+                                                    var resIndex = i * tileSize * (xMax - xMin + 1) + j + shift + k * tileSize * tileSize * (xMax - xMin + 1);
+                                                    buffer[resIndex] = tileData[index];
+                                                }
+                                        processed++;
+                                    }
+
+                                    if (tileData.All(b => b == 0))
+                                    {
+                                        failedTiles.Add(new Tuple<int, int>(x, y1));
+                                    }
+                                }
+                                else
+                                {
+                                    processed++;
+                                    failedTiles.Add(new Tuple<int, int>(x, y1));
+                                }
+                                
+                            }
+                            catch (Exception)
+                            {
+                                lock (buffer)
+                                {
+                                    processed++;
+                                    failedTiles.Add(new Tuple<int, int>(x, y1));
+                                }
+                            }
+                            downloadTask.Value = processed;
+                        });
+
+                        mosaicRgb.WriteRaster(0, (y - yMin) * tileSize, tileSize * (xMax - xMin + 1), tileSize, buffer,
+                            tileSize * (xMax - xMin + 1),
+                            tileSize, bandsCount, bands, 0, 0, 0);
+                        mosaicRgb.FlushCache();
+                        mosaicRgb.Dispose();
+                    }
+                });
+            if (failedTiles.Count > 0)
+            {
+                var finallyProcessed = true;
+                AnsiConsole.Progress()
+                    .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
+                        new RemainingTimeColumn(), new SpinnerColumn())
+                    .Start(ctx =>
+                    {
+                        processed = 0;
+                        var downloadTask = ctx.AddTask("[green]Докачиваем данные[/]");
+                        downloadTask.MaxValue = failedTiles.Count;
+
+                        mosaicRgb = Gdal.Open(resFileName, Access.GA_Update);
+
+                        foreach (var tileIndex in failedTiles)
+                        {
+                            var url = string.Format(urlTemplate, planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                            try
+                            {
+                                var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.{ext}";
+                                DownloadFileAsync(url, filePath).Wait();
+                                if (File.Exists(filePath))
+                                {
+                                    var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                    var tileData = new byte[bandsCount * tileSize * tileSize];
+                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                    tile.Dispose();
+                                    File.Delete(filePath);
+
+                                    mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                }
+                            }
+                            catch (Exception)
+                            {
+                                finallyProcessed = false;
+                            }
+
+                            processed++;
+                            downloadTask.Value = processed;
+                        }
+
+                        mosaicRgb.FlushCache();
+                        mosaicRgb.Dispose();
+                    });
+                if (!finallyProcessed)
+                    AnsiConsole.Write("Есть битые тайлы");
+            }
+            if (enableCloudDetection)
+            {
+                var finallyProcessed = true;
+                AnsiConsole.Progress()
+                   .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
+                       new RemainingTimeColumn(), new SpinnerColumn())
+                   .Start(ctx =>
+                   {
+                       processed = 0;
+                       var downloadTask = ctx.AddTask("[green]Избавляемся от облачности[/]");
+                       downloadTask.MaxValue = cloudTiles.Count;
+                       mosaicRgb = Gdal.Open(resFileName, Access.GA_Update);
+                       Parallel.ForEach(cloudTiles, (tileIndex) =>
+                       {
+                           var input1 = new DenseTensor<float>([1, 3, 512, 512]);
+                           var input2 = enableComplexCloudDetection ? new DenseTensor<float>([1, 3, 512, 512]) : null;
+                           var bandsRGB16 = Enumerable.Range(1, 5).ToArray();
+                           var urlRGB16 = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                           var url = string.Format(urlTemplate, planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                           DateTime startSearchDate = endDate;
+                           DateTime endSearchDate = endDate;
+                           try
+                           {
+                               var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
+                               DownloadFileAsync(url, filePath).Wait();
+                               if (!File.Exists(filePath))
+                                   return;
+                               var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                               var mainTileData = new byte[bandsCount * tileSize * tileSize];
+                               tile.ReadRaster(0, 0, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               tile.Dispose();
+                               File.Delete(filePath);
+
+                               byte[,] mainMask = new byte[tileSize, tileSize];
+                               for (int i = 0; i < tileSize; i++)
+                               {
+                                   for (int j = 0; j < tileSize; j++)
+                                   {
+                                       mainMask[i, j] = 4;
+                                   }
+                               }
+
+                               double cloudPercent = 1;
+                               int sameMaskCount = 0;
+                               while (startSearchDate > startDate)
+                               {
+                                   try
+                                   {
+                                       startSearchDate = endSearchDate.AddDays(-5);
+                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 50).Result;
+                                       bandsRGB16 = Enumerable.Range(1, 5).ToArray();
+                                       urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                       url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       DownloadFileAsync(urlRGB16, filePath).Wait();
+                                       if (!File.Exists(filePath))
+                                       {
+                                           endSearchDate = startSearchDate.AddDays(-1);
+                                           continue;
+                                       }
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
+                                       var task = DownloadFileAsync(url, filePath);
+
+                                       for (var k = 0; k < 3; k++)
+                                           for (var i = 0; i < tileSize; i++)
+                                               for (var j = 0; j < tileSize; j++)
+                                               {
+                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                   input1[0, k, i, j] = Math.Abs(Convert.ToSingle((tmpTileDataRGB16[index] - 1175) / 0.25));
+                                                   if (enableComplexCloudDetection)
+                                                       input2[0, k, i, j] = Math.Abs(Convert.ToSingle(tmpTileDataRGB16[index] / 0.25));
+                                               }
+                                       double tmpCloudPercent;
+                                       byte[,] tmpMask = GetMask(session, tileSize, input1, input2, out tmpCloudPercent, enableComplexCloudDetection);
+                                       tmpMask = Dilate(tmpMask, 15);
+
+                                       task.Wait();
+                                       if (!File.Exists(filePath))
+                                       {
+                                           endSearchDate = startSearchDate.AddDays(-1);
+                                           continue;
+                                       }
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileData = new byte[bandsCount * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+
+                                       if (tmpTileData.All(b => b == 0) || tmpCloudPercent > 50 * cloudPercentLimit)
+                                       {
+                                           endSearchDate = startSearchDate.AddDays(-1);
+                                           continue;
+                                       }
+
+                                       int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
+                                       if (tmpCloudPercent < cloudPercentLimit)
+                                       {
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                   {
+                                                       mainMask[j, j] = tmpMask[i, j];
+                                                       for (int k = 0; k < bandsCount; k++)
+                                                       {
+                                                           var index = i * tileSize + j + k * tileSize * tileSize;
+                                                           mainTileData[index] = tmpTileData[index];
+                                                       }
+                                                   }
+                                                   if (tmpMask[i, j] is 2 or 3 or 4)
+                                                       cloudPixels++;
+                                               }
+                                           }
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
+                                       }
+                                       else
+                                       {
+                                           int samePixels = 0;
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (mainMask[i, j] == tmpMask[i, j])
+                                                       samePixels++;
+                                                   if (mainMask[i, j] is 2 or 3 or 4)
+                                                   {
+                                                       if (tmpMask[i, j] == 1 && tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                       {
+                                                           mainMask[j, j] = tmpMask[i, j];
+                                                           for (int k = 0; k < bandsCount; k++)
+                                                           {
+                                                               var index = i * tileSize + j + k * tileSize * tileSize;
+                                                               mainTileData[index] = tmpTileData[index];
+                                                           }
+                                                       }
+                                                       else
+                                                           cloudPixels++;
+                                                   }
+                                               }
+                                           }
+                                           if ((double)samePixels / (tileSize * tileSize) > 0.85)
+                                               sameMaskCount++;
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
+                                       }
+                                       if (sameMaskCount == 4 || cloudPercent < cloudPercentLimit)
+                                           break;
+                                       endSearchDate = startSearchDate.AddDays(-1);
+                                   }
+                                   catch (Exception)
+                                   {
+                                       endSearchDate = startSearchDate.AddDays(-1);
+                                   }
+                               }
+
+                               if (enableHistMatch)
+                               {
+                                   var nearestTileIndex = FindNearestTile(clearTiles, tileIndex);
+                                   var nearestTileData = new byte[bandsCount * tileSize * tileSize];
+                                   mosaicRgb.ReadRaster((nearestTileIndex.Item1 - xMin) * tileSize, (nearestTileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, nearestTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                   mainTileData = HistogramMatch(mainTileData, nearestTileData, tileSize, bandsCount);
+                               }
+
+                               mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                           }
+                           catch (Exception)
+                           {
+                               finallyProcessed = false;
+                           }
+                           if (startSearchDate > endDate)
+                               finallyProcessed = false;
+                           processed++;
+                           downloadTask.Value = processed;
+                       });
+                       mosaicRgb.FlushCache();
+                       mosaicRgb.Dispose();
+                   });
+                if (!finallyProcessed)
+                    AnsiConsole.Write("Облачные тайлы не удалось заменить полностью");
+            }
+        }
+        return Task.CompletedTask;
+    }
+
+    private static async Task DownloadFileAsync(string url, string fileName)
+    {
+        using var client = new HttpClient();
+        var response = await client.GetAsync(url);
+        if (response.IsSuccessStatusCode)
+        {
+            await using var fileStream = File.Create(fileName);
+            await response.Content.CopyToAsync(fileStream);
+        }
+    }
+
+    private static async Task<string> GetPlanetaryComputerKey(string dataType, DateTime start, DateTime end, int clouds)
+    {
+        var httpClient = new HttpClient();
+        var requestBody = GetRequestBody(dataType, $"{start.Year}-{start.Month}-{start.Day}", $"{end.Year}-{end.Month}-{end.Day}", clouds);
+        var response = await httpClient.PostAsync("https://planetarycomputer.microsoft.com/api/data/v1/mosaic/register", new StringContent(requestBody, Encoding.UTF8, "application/json"));
+        var json = await response.Content.ReadAsStringAsync();
+        var rx = PlanetaryComputerKeyRegex();
+        var match = rx.Match(json);
+        var planetaryComputerKey = match.Groups["key"].Value;
+        return planetaryComputerKey;
+    }
+
+    private static string GetRequestBody(string dataType, string startDate, string endDate, int clouds)
+    {
+        return dataType switch
+        {
+            "RGB" or "NDVI" or "B08" or "RGB16" => $$"""
+                                          {
+                                              "filter-lang": "cql2-json",
+                                              "filter": {
+                                                  "op": "and",
+                                                  "args": [
+                                                      {
+                                                          "op": "=",
+                                                          "args": [
+                                                              {
+                                                                  "property": "collection"
+                                                              },
+                                                              "sentinel-2-l2a"
+                                                          ]
+                                                      },
+                                                      {
+                                                          "op": "anyinteracts",
+                                                          "args": [
+                                                              {
+                                                                  "property": "datetime"
+                                                              },
+                                                              {
+                                                                  "interval": [
+                                                                      "{{startDate}}",
+                                                                      "{{endDate}}T23:59:59Z"
+                                                                  ]
+                                                              }
+                                                          ]
+                                                      },
+                                                      {
+                                                          "op": "<=",
+                                                          "args": [
+                                                              {
+                                                                  "property": "eo:cloud_cover"
+                                                              },
+                                                              {{clouds}}
+                                                          ]
+                                                      }
+                                                  ]
+                                              },
+                                              "sortby": [
+                                                  {
+                                                      "field": "eo:cloud_cover",
+                                                      "direction": "asc"
+                                                  },
+                                                  {
+                                                      "field": "datetime",
+                                                      "direction": "desc"
+                                                  }
+                                              ]
+                                          }
+                                          """,
+            "LandCover9Classes" => $$"""
+                             {
+                                 "filter-lang": "cql2-json",
+                                 "filter": {
+                                     "op": "and",
+                                     "args": [
+                                         {
+                                             "op": "=",
+                                             "args": [
+                                                 {
+                                                     "property": "collection"
+                                                 },
+                                                 "io-lulc-annual-v02"
+                                             ]
+                                         },
+                                         {
+                                             "op": "anyinteracts",
+                                             "args": [
+                                                 {
+                                                     "property": "datetime"
+                                                 },
+                                                 {
+                                                     "interval": [
+                                                         "{{startDate}}",
+                                                         "{{endDate}}T23:59:59Z"
+                                                     ]
+                                                 }
+                                             ]
+                                         }
+                                     ]
+                                 },
+                                 "sortby": [
+                                     {
+                                         "field": "datetime",
+                                         "direction": "desc"
+                                     }
+                                 ]
+                             }
+                             """,
+            "ESAWorldCover" => $$"""
+                             {
+                                 "filter-lang": "cql2-json",
+                                 "filter": {
+                                     "op": "and",
+                                     "args": [
+                                         {
+                                             "op": "=",
+                                             "args": [
+                                                 {
+                                                     "property": "collection"
+                                                 },
+                                                 "esa-worldcover"
+                                             ]
+                                         },
+                                         {
+                                             "op": "anyinteracts",
+                                             "args": [
+                                                 {
+                                                     "property": "datetime"
+                                                 },
+                                                 {
+                                                     "interval": [
+                                                         "{{startDate}}",
+                                                         "{{endDate}}T23:59:59Z"
+                                                     ]
+                                                 }
+                                             ]
+                                         }
+                                     ]
+                                 },
+                                 "sortby": [
+                                     {
+                                         "field": "datetime",
+                                         "direction": "desc"
+                                     }
+                                 ]
+                             }
+                             """,
+            _ => $$"""
+                   {
+                       "filter-lang": "cql2-json",
+                       "filter": {
+                           "op": "and",
+                           "args": [
+                               {
+                                   "op": "=",
+                                   "args": [
+                                       {
+                                           "property": "collection"
+                                       },
+                                       "landsat-c2-l2"
+                                   ]
+                               },
+                               {
+                                   "op": "anyinteracts",
+                                   "args": [
+                                       {
+                                           "property": "datetime"
+                                       },
+                                       {
+                                           "interval": [
+                                               "{{startDate}}",
+                                               "{{endDate}}T23:59:59Z"
+                                           ]
+                                       }
+                                   ]
+                               },
+                               {
+                                   "op": "<=",
+                                   "args": [
+                                       {
+                                           "property": "eo:cloud_cover"
+                                       },
+                                       {{clouds}}
+                                   ]
+                               }
+                           ]
+                       },
+                       "sortby": [
+                           {
+                               "field": "eo:cloud_cover",
+                               "direction": "asc"
+                           },
+                           {
+                               "field": "datetime",
+                               "direction": "desc"
+                           }
+                       ]
+                   }
+                   """
+        };
+    }
+
+    private static byte FindMax(float[] classes)
+    {
+        byte maxIndex = 0;
+        float max = 0;
+        for (int i = 0; i < classes.Length; i++)
+        {
+            if (classes[i] > max)
+            {
+                max = classes[i];
+                maxIndex = Convert.ToByte(i);
+            }
+        }
+        return maxIndex;
+    }
+
+    private static byte[,] GetMask(InferenceSession session, int tileSize, DenseTensor<float> input1, DenseTensor<float> input2, out double cloudPercent, bool enableComplexCloudDetection = true)
+    {
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results1 = session.Run(
+        [
+            NamedOnnxValue.CreateFromTensor("x.1", input1)
+        ]);
+        if (results1.FirstOrDefault()?.Value is not Tensor<float> output1)
+            throw new ApplicationException("Изображение не может быть обработано");
+
+        cloudPercent = 0;
+        var mask = new byte[tileSize, tileSize];
+        if (enableComplexCloudDetection)
+        {
+            using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results2 = session.Run(
+            [
+                NamedOnnxValue.CreateFromTensor("x.1", input2)
+            ]);
+            if (results2.FirstOrDefault()?.Value is not Tensor<float> output2)
+                throw new ApplicationException("Изображение не может быть обработано");
+            for (var i = 0; i < tileSize; i++)
+            {
+                for (var j = 0; j < tileSize; j++)
+                {
+                    byte maskClass1 = FindMax([output1[0, 0, i, j], output1[0, 1, i, j], output1[0, 2, i, j], output1[0, 3, i, j], output1[0, 4, i, j]]);
+                    byte maskClass2 = FindMax([output2[0, 0, i, j], output2[0, 1, i, j], output2[0, 2, i, j], output2[0, 3, i, j], output2[0, 4, i, j]]);
+                    if (maskClass1 is 4 or 3 or 2)
+                    {
+                        mask[i, j] = maskClass1;
+                        cloudPercent++;
+                    }
+                    else if (maskClass2 is 4)
+                    {
+                        mask[i, j] = 4;
+                        cloudPercent++;
+                    }
+                    else
+                        mask[i, j] = 1;
+                }
+            }
+        }
+        else
+        {
+            for (var i = 0; i < tileSize; i++)
+            {
+                for (var j = 0; j < tileSize; j++)
+                {
+                    byte maskClass1 = FindMax([output1[0, 0, i, j], output1[0, 1, i, j], output1[0, 2, i, j], output1[0, 3, i, j], output1[0, 4, i, j]]);
+                    if (maskClass1 is 4 or 3 or 2)
+                    {
+                        mask[i, j] = maskClass1;
+                        cloudPercent++;
+                    }
+                    else
+                        mask[i, j] = 1;
+                }
+            }
+        }
+        cloudPercent /= (tileSize * tileSize);
+        return mask;
+    }
+
+    private static double GetCloudPercent(InferenceSession session, int tileSize, DenseTensor<float> input1, DenseTensor<float> input2, bool enableComplexCloudDetection = true)
+    {
+        using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results1 = session.Run(
+        [
+            NamedOnnxValue.CreateFromTensor("x.1", input1)
+        ]);
+        if (results1.FirstOrDefault()?.Value is not Tensor<float> output1)
+            throw new ApplicationException("Изображение не может быть обработано");
+
+        double cloudPercent = 0;
+        if (enableComplexCloudDetection)
+        {
+            using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results2 = session.Run(
+            [
+                NamedOnnxValue.CreateFromTensor("x.1", input2)
+            ]);
+            if (results2.FirstOrDefault()?.Value is not Tensor<float> output2)
+                throw new ApplicationException("Изображение не может быть обработано");
+            for (var i = 0; i < tileSize; i++)
+            {
+                for (var j = 0; j < tileSize; j++)
+                {
+                    byte maskClass1 = FindMax([output1[0, 0, i, j], output1[0, 1, i, j], output1[0, 2, i, j], output1[0, 3, i, j], output1[0, 4, i, j]]);
+                    byte maskClass2 = FindMax([output2[0, 0, i, j], output2[0, 1, i, j], output2[0, 2, i, j], output2[0, 3, i, j], output2[0, 4, i, j]]);
+                    if (maskClass1 is 4 or 3 or 2 || enableComplexCloudDetection && maskClass2 is 4)
+                        cloudPercent++;
+                }
+            }
+        }
+        else
+        {
+            for (var i = 0; i < tileSize; i++)
+            {
+                for (var j = 0; j < tileSize; j++)
+                {
+                    byte maskClass1 = FindMax([output1[0, 0, i, j], output1[0, 1, i, j], output1[0, 2, i, j], output1[0, 3, i, j], output1[0, 4, i, j]]);
+                    if (maskClass1 is 4 or 3 or 2)
+                        cloudPercent++;
+                }
+            }
+        }
+        return cloudPercent / (tileSize * tileSize);
+    }
+
+    private static byte[,] Dilate(byte[,] mask, int size)
+    {
+        byte[,] tmpMask = mask;
+        byte[,] newMask = new byte[mask.GetLength(0), mask.GetLength(1)];
+        Random TempRandom = new Random();
+        int apetureMin = -(size / 2);
+        int apetureMax = (size / 2);
+        for (int x = 0; x < mask.GetLength(0); ++x)
+        {
+            for (int y = 0; y < mask.GetLength(1); ++y)
+            {
+                byte value = 0;
+                for (int x2 = apetureMin; x2 < apetureMax; ++x2)
+                {
+                    int tmpX = x + x2;
+                    if (tmpX >= 0 && tmpX < mask.GetLength(0))
+                    {
+                        for (int y2 = apetureMin; y2 < apetureMax; ++y2)
+                        {
+                            int tmpY = y + y2;
+                            if (tmpY >= 0 && tmpY < mask.GetLength(1))
+                            {
+                                if (tmpMask[tmpX, tmpY] > value)
+                                    value = tmpMask[tmpX, tmpY];
+                            }
+                        }
+                    }
+                }
+                newMask[x, y] = value;
+            }
+        }
+        return newMask;
+    }
+
+    private static Tuple<int, int> FindNearestTile(List<Tuple<int, int>> tiles, Tuple<int, int> keyTile)
+    {
+        if (tiles.Count == 0)
+            throw new Exception("Tiles list is empty.");
+        int minDistance = Math.Abs(keyTile.Item1 - tiles[0].Item1) + Math.Abs(keyTile.Item2 - tiles[0].Item2);
+        Tuple<int, int> nearestTile = tiles[0];
+        foreach (var tile in tiles)
+        {
+            int distance = Math.Abs(keyTile.Item1 - tile.Item1) + Math.Abs(keyTile.Item2 - tile.Item2);
+            if (distance < minDistance)
+            {
+                minDistance = distance;
+                nearestTile = tile;
+            }
+        }
+        return nearestTile;
+    }
+
+    private static byte[] HistogramMatch(byte[] source, byte[] template, int tileSize, int bandsCount)
+    {
+        var sourceList = SplitBands(source, tileSize, bandsCount);
+        var templateList = SplitBands(template, tileSize, bandsCount);
+        var resultList = new List<byte[]>();
+        for (int j = 0; j < sourceList.Count - 1; j++)
+        {
+            var sourceBand = sourceList[j];
+            var templateBand = templateList[j];
+            byte[] indexesSource, indexesTemplate;
+            double[] countsSource, countsTemplate;
+            var uniqueSource = Unique(sourceBand, out indexesSource, out countsSource);
+            NormalizedCumSum(ref countsSource);
+            var uniqueTemplate = Unique(templateBand, out indexesTemplate, out countsTemplate);
+            NormalizedCumSum(ref countsTemplate);
+            var values = new double[uniqueTemplate.Count];
+            var enumerator = uniqueTemplate.GetEnumerator();
+            enumerator.MoveNext();
+            for (int i = 0; i < values.Length; i++)
+            {
+                values[i] = enumerator.Current.Key;
+                enumerator.MoveNext();
+            }
+            var interpolation = LinearSpline.Interpolate(countsTemplate, values);
+            var resultDict = new Dictionary<byte, byte>();
+            for (int i = 0; i < uniqueSource.Count; i++)
+            {
+                double tmp = interpolation.Interpolate(countsSource[i]);
+                if (tmp < 0)
+                    tmp = 0;
+                else if (tmp > 255)
+                    tmp = 255;
+                resultDict.Add(Convert.ToByte(i), Convert.ToByte(tmp));
+            }
+            var resultBand = new byte[sourceBand.Length];
+            for (int i = 0; i < sourceBand.Length; i++)
+            {
+                resultBand[i] = resultDict[indexesSource[i]];
+            }
+            resultList.Add(resultBand);
+        }
+        resultList.Add(sourceList.Last());
+        var result = UnionBands(resultList, tileSize);
+        return result;
+    }
+
+    private static Dictionary<byte, byte> Unique(byte[] array, out byte[] indexes, out double[] counts)
+    {
+        var unique = new HashSet<byte>(array).ToArray();
+        Array.Sort(unique);
+        var uniqueDict = new Dictionary<byte, byte>();
+        for (int i = 0; i < unique.Length; i++)
+        {
+            uniqueDict.Add(unique[i], Convert.ToByte(i));
+        }
+        indexes = new byte[array.Length];
+        counts = new double[unique.Length];
+        for (int i = 0; i < array.Length; i++)
+        {
+            byte index = uniqueDict[array[i]];
+            indexes[i] = index;
+            counts[index]++;
+        }
+        return uniqueDict;
+    }
+
+    private static void NormalizedCumSum(ref double[] counts)
+    {
+        double sum = 0;
+        for (int i = 0; i < counts.Length; i++)
+        {
+            sum += counts[i];
+            counts[i] = sum;
+        }
+        for (int i = 0; i < counts.Length; i++)
+        {
+            counts[i] /= sum;
+        }
+    }
+
+    private static List<byte[]> SplitBands(byte[] imageByte, int tileSize, int bandsCount)
+    {
+        var result = new List<byte[]>();
+        for (int i = 0; i < bandsCount; i++)
+        {
+            result.Add(new byte[imageByte.Length / bandsCount]);
+        }
+        for (int i = 0; i < tileSize; i++)
+        {
+            for (int j = 0; j < tileSize; j++)
+            {
+                for (int k = 0; k < bandsCount; k++)
+                {
+                    var index = i * tileSize + j + k * tileSize * tileSize;
+                    result[k][i * tileSize + j] = imageByte[index];
+                }
+            }
+        }
+        return result;
+    }
+
+    private static byte[] UnionBands(List<byte[]> bands, int tileSize)
+    {
+        var result = new byte[bands.Count * tileSize * tileSize];
+        for (int i = 0; i < tileSize; i++)
+        {
+            for (int j = 0; j < tileSize; j++)
+            {
+                for (int k = 0; k < bands.Count; k++)
+                {
+                    var index = i * tileSize + j + k * tileSize * tileSize;
+                    result[index] = bands[k][i * tileSize + j];
+                }
+            }
+        }
+        return result;
+    }
+
+    [GeneratedRegex("mosaic/(?<key>\\w+)/info", RegexOptions.IgnoreCase | RegexOptions.Compiled, "ru-RU")]
+    private static partial Regex PlanetaryComputerKeyRegex();
+
+}
