@@ -86,7 +86,9 @@ internal partial class Program
                 .AddChoices(UrlTemplates.Keys)) : args[8];
 
         enableCloudDetection = enableCloudDetection && dataType is "RGB" or "NDVI" or "B08" or "RGB16";
-        double cloudPercentLimit = 0.001;
+        var cloudPercentLimit = 0.001;
+        var dilation = 15;
+        var searchCloudPercent = 50;
 
         AnsiConsole.WriteLine(region);
         AnsiConsole.WriteLine(dataType);
@@ -356,15 +358,8 @@ internal partial class Program
                            DateTime endSearchDate = endDate;
                            try
                            {
-                               var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
-                               DownloadFileAsync(url, filePath).Wait();
-                               if (!File.Exists(filePath))
-                                   return;
-                               var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
                                var mainTileData = new int[bandsCount * tileSize * tileSize];
-                               tile.ReadRaster(0, 0, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
-                               tile.Dispose();
-                               File.Delete(filePath);
+                               mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
 
                                byte[,] mainMask = new byte[tileSize, tileSize];
                                for (int i = 0; i < tileSize; i++)
@@ -382,25 +377,25 @@ internal partial class Program
                                    try
                                    {
                                        startSearchDate = endSearchDate.AddDays(-5);
-                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 50).Result;
+                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
                                        bandsRGB16 = Enumerable.Range(1, 5).ToArray();
                                        urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
                                        url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
 
-                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
                                        DownloadFileAsync(urlRGB16, filePath).Wait();
                                        if (!File.Exists(filePath))
                                        {
                                            endSearchDate = startSearchDate.AddDays(-1);
                                            continue;
                                        }
-                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
                                        var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
                                        tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
                                        tile.Dispose();
                                        File.Delete(filePath);
 
-                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
                                        var task = DownloadFileAsync(url, filePath);
 
                                        for (var k = 0; k < 3; k++)
@@ -414,7 +409,7 @@ internal partial class Program
                                                }
                                        double tmpCloudPercent;
                                        byte[,] tmpMask = GetMask(session, tileSize, input1, input2, out tmpCloudPercent, enableComplexCloudDetection);
-                                       tmpMask = Dilate(tmpMask, 15);
+                                       tmpMask = Dilate(tmpMask, dilation);
 
                                        task.Wait();
                                        if (!File.Exists(filePath))
@@ -684,15 +679,8 @@ internal partial class Program
                            DateTime endSearchDate = endDate;
                            try
                            {
-                               var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
-                               DownloadFileAsync(url, filePath).Wait();
-                               if (!File.Exists(filePath))
-                                   return;
-                               var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
                                var mainTileData = new byte[bandsCount * tileSize * tileSize];
-                               tile.ReadRaster(0, 0, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
-                               tile.Dispose();
-                               File.Delete(filePath);
+                               mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
 
                                byte[,] mainMask = new byte[tileSize, tileSize];
                                for (int i = 0; i < tileSize; i++)
@@ -710,19 +698,19 @@ internal partial class Program
                                    try
                                    {
                                        startSearchDate = endSearchDate.AddDays(-5);
-                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 50).Result;
+                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
                                        bandsRGB16 = Enumerable.Range(1, 5).ToArray();
                                        urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
                                        url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
 
-                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
                                        DownloadFileAsync(urlRGB16, filePath).Wait();
                                        if (!File.Exists(filePath))
                                        {
                                            endSearchDate = startSearchDate.AddDays(-1);
                                            continue;
                                        }
-                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
                                        var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
                                        tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
                                        tile.Dispose();
@@ -742,7 +730,7 @@ internal partial class Program
                                                }
                                        double tmpCloudPercent;
                                        byte[,] tmpMask = GetMask(session, tileSize, input1, input2, out tmpCloudPercent, enableComplexCloudDetection);
-                                       tmpMask = Dilate(tmpMask, 15);
+                                       tmpMask = Dilate(tmpMask, dilation);
 
                                        task.Wait();
                                        if (!File.Exists(filePath))
