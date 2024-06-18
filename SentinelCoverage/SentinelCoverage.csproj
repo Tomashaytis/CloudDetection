@@ -7,15 +7,14 @@
     <Platforms>AnyCPU;x86;x64</Platforms>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="AWSSDK.S3" Version="3.7.104.30" />
-    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
-    <PackageReference Include="MaxRev.Gdal.Core" Version="3.8.3.286" />
-    <PackageReference Include="MaxRev.Gdal.LinuxRuntime.Minimal" Version="3.8.3.286" />
-    <PackageReference Include="MaxRev.Gdal.WindowsRuntime.Minimal" Version="3.8.3.259" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="7.0.0" />
+    <PackageReference Include="AWSSDK.S3" Version="3.7.309.4" />
+    <PackageReference Include="MaxRev.Gdal.Core" Version="3.9.0.218" />
+    <PackageReference Include="MaxRev.Gdal.LinuxRuntime.Minimal" Version="3.9.0.218" />
+    <PackageReference Include="MaxRev.Gdal.WindowsRuntime.Minimal" Version="3.9.0.218" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="8.0.0" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.18.0" />
-    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.18.1" />
+    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.20.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="Spectre.Console" Version="0.47.0" />
+    <PackageReference Include="Spectre.Console" Version="0.49.1" />
   </ItemGroup>
 </Project>

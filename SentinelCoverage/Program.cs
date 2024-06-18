@@ -12,9 +12,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using File = System.IO.File;
-using MathNet.Numerics.Interpolation;
-using System.Diagnostics;
-using System.Threading.Channels;
 
 
 namespace SentinelCoverage;
@@ -23,8 +20,10 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
-        {"Release", new Tuple<double, double, double, double>(48.8621,48.5437,49.1070,48.2097)},
-        {"Test", new Tuple<double, double, double, double>(50.0460, 53.3538, 50.4056, 53.1471)},
+        {"Город", new Tuple<double, double, double, double>(50.0460, 53.1538, 50.4056, 52.8471)},
+        {"Поле", new Tuple<double, double, double, double>(50.0460, 51.3538, 50.4056, 51.1471)},
+        {"Соляное озеро", new Tuple<double, double, double, double>(46.8621,48.2437,47.1070,47.9097)},
+        {"Степь", new Tuple<double, double, double, double>(48.8621,48.5437,49.1070,48.2097)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
         {"Саратовская область", new Tuple<double, double, double, double>(42.3861, 52.9233, 50.9538, 50.2228)},
@@ -97,8 +96,8 @@ internal partial class Program
         var startCloudPercent = 30;
         var endCloudPercent = 60;
         var cloudPercentStep = 20;
-        var maxSimilarTilesCount = 6;
-        var correlationLimit = 0.85;
+        var maxSimilarTilesCount = 7;
+        var correlationLimit = 0.9;
 
         var urlTemplate = UrlTemplates[dataType];
         if (dataType == "RGB" && startDate.Year < 2022)
@@ -502,6 +501,8 @@ internal partial class Program
                                            }
                                            if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
                                            {
+                                               if (sameMaskCount >= maxSimilarTilesCount)
+                                                   mainTileData = tmpTileData;
                                                isEndWork = true;
                                                break;
                                            }
@@ -819,7 +820,7 @@ internal partial class Program
                                                                        mainTileData[index] = tmpTileData[index];
                                                                    }
                                                                }
-                                                               else if (mainMask[i, j] is 4 && tmpMask[i, j] is 3 or 2)
+                                                               else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
                                                                {
                                                                    mainMask[i, j] = tmpMask[i, j];
                                                                    for (int k = 0; k < bandsCount; k++)
@@ -843,6 +844,8 @@ internal partial class Program
                                            }
                                            if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
                                            {
+                                               if (sameMaskCount >= maxSimilarTilesCount)
+                                                   mainTileData = tmpTileData;
                                                isEndWork = true;
                                                break;
                                            }
