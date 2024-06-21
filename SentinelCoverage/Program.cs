@@ -6,6 +6,7 @@ using OSGeo.OSR;
 using Spectre.Console;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -20,10 +21,7 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
-        {"Город", new Tuple<double, double, double, double>(50.0460, 53.1538, 50.4056, 52.8471)},
-        {"Поле", new Tuple<double, double, double, double>(50.0460, 51.3538, 50.4056, 51.1471)},
-        {"Соляное озеро", new Tuple<double, double, double, double>(46.8621,48.2437,47.1070,47.9097)},
-        {"Степь", new Tuple<double, double, double, double>(48.8621,48.5437,49.1070,48.2097)},
+        {"Test", new Tuple<double, double, double, double>(50, 53.35, 50.4, 53.1)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
         {"Саратовская область", new Tuple<double, double, double, double>(42.3861, 52.9233, 50.9538, 50.2228)},
@@ -90,12 +88,12 @@ internal partial class Program
         AnsiConsole.WriteLine(dataType);
 
         enableCloudDetection = enableCloudDetection && dataType is "RGB" or "NDVI" or "B08" or "RGB16";
-        var cloudPercentLimit = 0.005;
-        var dilation = 15;
-        var dayStep = 5;
+        var cloudPercentLimit = 0.01;
+        var dilation = 10;
+        var dayStep = 6;
         var startCloudPercent = 30;
-        var endCloudPercent = 60;
-        var cloudPercentStep = 20;
+        var endCloudPercent = 70;
+        var cloudPercentStep = 15;
         var maxSimilarTilesCount = 7;
         var correlationLimit = 0.9;
 
@@ -335,7 +333,7 @@ internal partial class Program
                 if (!finallyProcessed)
                     AnsiConsole.Write("Есть битые тайлы");
             }
-            if (enableCloudDetection)
+            if (enableCloudDetection && cloudTiles.Count > 0)
             {
                 var finallyProcessed = true;
                 AnsiConsole.Progress()
@@ -501,8 +499,6 @@ internal partial class Program
                                            }
                                            if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
                                            {
-                                               if (sameMaskCount >= maxSimilarTilesCount)
-                                                   mainTileData = tmpTileData;
                                                isEndWork = true;
                                                break;
                                            }
@@ -611,7 +607,7 @@ internal partial class Program
                                     processed++;
                                     failedTiles.Add(new Tuple<int, int>(x, y1));
                                 }
-                                
+
                             }
                             catch (Exception)
                             {
@@ -678,7 +674,7 @@ internal partial class Program
                 if (!finallyProcessed)
                     AnsiConsole.Write("Есть битые тайлы");
             }
-            if (enableCloudDetection)
+            if (enableCloudDetection && cloudTiles.Count > 0)
             {
                 var finallyProcessed = true;
                 AnsiConsole.Progress()
@@ -844,8 +840,6 @@ internal partial class Program
                                            }
                                            if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
                                            {
-                                               if (sameMaskCount >= maxSimilarTilesCount)
-                                                   mainTileData = tmpTileData;
                                                isEndWork = true;
                                                break;
                                            }
