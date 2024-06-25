@@ -92,7 +92,7 @@ internal partial class Program
         var dilation = 10;
         var dayStep = 6;
         var startCloudPercent = 30;
-        var endCloudPercent = 70;
+        var endCloudPercent = 60;
         var cloudPercentStep = 15;
         var maxSimilarTilesCount = 7;
         var correlationLimit = 0.9;
@@ -727,7 +727,7 @@ internal partial class Program
                                    try
                                    {
                                        startSearchDate = endSearchDate.AddDays(-dayStep);
-                                       for (int searchCloudPercent = startCloudPercent; searchCloudPercent < endCloudPercent; searchCloudPercent += cloudPercentStep)
+                                       for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
                                        {
                                            var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
                                            bandsRGB16 = Enumerable.Range(1, 5).ToArray();
