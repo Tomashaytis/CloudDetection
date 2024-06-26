@@ -386,7 +386,7 @@ internal partial class Program
                                    try
                                    {
                                        startSearchDate = endSearchDate.AddDays(-dayStep);
-                                       for (int searchCloudPercent = startCloudPercent; searchCloudPercent < endCloudPercent; searchCloudPercent += cloudPercentStep)
+                                       for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
                                        {
                                            var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
                                            bandsRGB16 = Enumerable.Range(1, 5).ToArray();
