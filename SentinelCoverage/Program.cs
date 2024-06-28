@@ -21,6 +21,7 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
+        {"Test1", new Tuple<double, double, double, double>(50.2, 53.35, 50.4, 53.25)},
         {"Test", new Tuple<double, double, double, double>(50, 53.35, 50.4, 53.1)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
@@ -96,6 +97,7 @@ internal partial class Program
         var cloudPercentStep = 15;
         var maxSimilarTilesCount = 7;
         var correlationLimit = 0.9;
+        var dayReserve = 10;
 
         var urlTemplate = UrlTemplates[dataType];
         if (dataType == "RGB" && startDate.Year < 2022)
@@ -351,8 +353,6 @@ internal partial class Program
                            var bandsRGB16 = Enumerable.Range(1, 5).ToArray();
                            var urlRGB16 = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
                            var url = string.Format(urlTemplate, planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
-                           DateTime startSearchDate = endDate.AddDays(-dayStep);
-                           DateTime endSearchDate = endDate.AddDays(-dayStep);
                            try
                            {
                                var mainTileData = new int[bandsCount * tileSize * tileSize];
@@ -381,13 +381,14 @@ internal partial class Program
 
                                int sameMaskCount = 0;
                                bool isEndWork = false;
-                               while (startSearchDate > startDate)
+                               startDate = startDate.AddDays(-dayReserve);
+                               for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
                                {
                                    try
                                    {
-                                       startSearchDate = endSearchDate.AddDays(-dayStep);
-                                       for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
+                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= startDate; startSearchDate = startSearchDate.AddDays(-dayStep))
                                        {
+                                           DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                            var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
                                            bandsRGB16 = Enumerable.Range(1, 5).ToArray();
                                            urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
@@ -475,7 +476,7 @@ internal partial class Program
                                                                        mainTileData[index] = tmpTileData[index];
                                                                    }
                                                                }
-                                                               else if (mainMask[i, j] is 4 && tmpMask[i, j] is 3 or 2)
+                                                               else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
                                                                {
                                                                    mainMask[i, j] = tmpMask[i, j];
                                                                    for (int k = 0; k < bandsCount; k++)
@@ -505,12 +506,8 @@ internal partial class Program
                                        }
                                        if (isEndWork)
                                            break;
-                                       endSearchDate = startSearchDate.AddDays(-1);
                                    }
-                                   catch (Exception)
-                                   {
-                                       endSearchDate = startSearchDate.AddDays(-1);
-                                   }
+                                   catch (Exception) { }
                                }
                                mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
                            }
@@ -692,8 +689,6 @@ internal partial class Program
                            var bandsRGB16 = Enumerable.Range(1, 5).ToArray();
                            var urlRGB16 = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
                            var url = string.Format(urlTemplate, planetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
-                           DateTime startSearchDate = endDate.AddDays(-dayStep);
-                           DateTime endSearchDate = endDate.AddDays(-dayStep);
                            try
                            {
                                var mainTileData = new byte[bandsCount * tileSize * tileSize];
@@ -722,13 +717,14 @@ internal partial class Program
 
                                int sameMaskCount = 0;
                                bool isEndWork = false;
-                               while (startSearchDate > startDate)
+                               startDate = startDate.AddDays(-dayReserve);
+                               for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
                                {
                                    try
                                    {
-                                       startSearchDate = endSearchDate.AddDays(-dayStep);
-                                       for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
+                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= startDate; startSearchDate = startSearchDate.AddDays(-dayStep))
                                        {
+                                           DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                            var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
                                            bandsRGB16 = Enumerable.Range(1, 5).ToArray();
                                            urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
@@ -846,12 +842,8 @@ internal partial class Program
                                        }
                                        if (isEndWork)
                                            break;
-                                       endSearchDate = startSearchDate.AddDays(-1);
                                    }
-                                   catch (Exception)
-                                   {
-                                       endSearchDate = startSearchDate.AddDays(-1);
-                                   }
+                                   catch (Exception) { }
                                }
                                mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
                            }
