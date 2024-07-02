@@ -71,8 +71,8 @@ internal partial class Program
         var zoom = args.Length == 0 ? AnsiConsole.Ask("Масштабный уровень: ", 13) : int.Parse(args[1]);
 
         AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
-        var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2022-06-01") : args[2];
-        var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2022-07-01") : args[3];
+        var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2023-07-01") : args[2];
+        var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2023-08-01") : args[3];
         var clouds = args.Length == 0 ? AnsiConsole.Ask("Облачность: ", 30) : int.Parse(args[4]);
 
         var enableCloudDetection = args.Length == 0 ? AnsiConsole.Confirm("Обнаружение облачности: ", true) : args[5] == "y";
@@ -92,9 +92,6 @@ internal partial class Program
         var cloudPercentLimit = 0.01;
         var dilation = 10;
         var dayStep = 6;
-        var startCloudPercent = 30;
-        var endCloudPercent = 60;
-        var cloudPercentStep = 15;
         var maxSimilarTilesCount = 5;
         var correlationLimit = 0.9;
         var dayReserve = 10;
@@ -160,35 +157,40 @@ internal partial class Program
                         var y1 = y;
                         _ = Parallel.ForEach(tiles, (x, _) =>
                         {
+                            var failedTilesCount = 0;
                             var input = new DenseTensor<float>([1, 3, 512, 512]);
                             var url = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, x, y1);
-                            try
+                            while (failedTilesCount <= 5)
                             {
-                                var filePath = $"{x}_{y1}.tif";
-                                DownloadFileAsync(url, filePath).Wait();
-                                if (File.Exists(filePath))
+                                try
                                 {
-                                    var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                    var tileData = new int[4 * tileSize * tileSize];
-                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, 4, bands, 0, 0, 0);
-                                    tile.Dispose();
-                                    File.Delete(filePath);
-                                    for (var k = 0; k < 3; k++)
-                                        for (var i = 0; i < tileSize; i++)
-                                            for (var j = 0; j < tileSize; j++)
-                                            {
-                                                var index = i * tileSize + j + k * tileSize * tileSize;
-                                                input[0, k, i, j] = Math.Abs(Convert.ToSingle((tileData[index] - 1175) / 0.25));
-                                            }
+                                    var filePath = $"{x}_{y1}.tif";
+                                    DownloadFileAsync(url, filePath).Wait();
+                                    if (File.Exists(filePath))
+                                    {
+                                        var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                        var tileData = new int[4 * tileSize * tileSize];
+                                        tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, 4, bands, 0, 0, 0);
+                                        tile.Dispose();
+                                        File.Delete(filePath);
+                                        for (var k = 0; k < 3; k++)
+                                            for (var i = 0; i < tileSize; i++)
+                                                for (var j = 0; j < tileSize; j++)
+                                                {
+                                                    var index = i * tileSize + j + k * tileSize * tileSize;
+                                                    input[0, k, i, j] = Math.Abs(Convert.ToSingle((tileData[index] - 1175) / 0.25));
+                                                }
 
-                                    double cloudPercent = GetCloudPercent(session, tileSize, input);
-                                    if (cloudPercent > cloudPercentLimit)
-                                        cloudTiles.Add(new Tuple<int, int>(x, y1));
+                                        double cloudPercent = GetCloudPercent(session, tileSize, input);
+                                        if (cloudPercent > cloudPercentLimit)
+                                            cloudTiles.Add(new Tuple<int, int>(x, y1));
+                                    }
+                                    break;
                                 }
-                            }
-                            catch (Exception err)
-                            {
-                                Console.WriteLine(err.Message);
+                                catch (Exception)
+                                {
+                                    failedTilesCount++;
+                                }
                             }
                             processed++;
                             downloadTask.Value = processed;
@@ -380,131 +382,122 @@ internal partial class Program
                                mainMask = Dilate(mainMask, dilation);
 
                                int sameMaskCount = 0;
-                               bool isEndWork = false;
-                              var tmpStartDate = startDate.AddDays(-dayReserve);
-                               for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
+                               var tmpStartDate = startDate.AddDays(-dayReserve);
+                               for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= tmpStartDate; startSearchDate = startSearchDate.AddDays(-dayStep))
                                {
                                    try
                                    {
-                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= tmpStartDate; startSearchDate = startSearchDate.AddDays(-dayStep))
-                                       {
-                                           DateTime endSearchDate = startSearchDate.AddDays(dayStep);
-                                           var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
-                                           bandsRGB16 = Enumerable.Range(1, 5).ToArray();
-                                           urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
-                                           url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                       DateTime endSearchDate = startSearchDate.AddDays(dayStep);
+                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 100).Result;
+                                       bandsRGB16 = Enumerable.Range(1, 5).ToArray();
+                                       urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                       url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
 
-                                           filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
-                                           DownloadFileAsync(urlRGB16, filePath).Wait();
-                                           if (!File.Exists(filePath))
-                                               continue;
-                                           tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                           var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
-                                           tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
-                                           tile.Dispose();
-                                           File.Delete(filePath);
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       DownloadFileAsync(urlRGB16, filePath).Wait();
+                                       if (!File.Exists(filePath))
+                                           continue;
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
 
-                                           filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
-                                           var task = DownloadFileAsync(url, filePath);
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
+                                       var task = DownloadFileAsync(url, filePath);
 
-                                           for (var k = 0; k < 3; k++)
-                                               for (var i = 0; i < tileSize; i++)
-                                                   for (var j = 0; j < tileSize; j++)
-                                                   {
-                                                       var index = i * tileSize + j + k * tileSize * tileSize;
-                                                       input[0, k, i, j] = Math.Abs(Convert.ToSingle((tmpTileDataRGB16[index] - 1175) / 0.25));
-                                                   }
-                                           double tmpCloudPercent;
-                                           byte[,] tmpMask = GetMask(session, tileSize, input, out tmpCloudPercent);
-                                           tmpMask = Dilate(tmpMask, dilation);
-
-                                           task.Wait();
-                                           if (!File.Exists(filePath))
-                                               continue;
-                                           tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                           var tmpTileData = new int[bandsCount * tileSize * tileSize];
-                                           tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
-                                           tile.Dispose();
-                                           File.Delete(filePath);
-
-                                           if (tmpTileData.All(b => b == 0))
-                                               continue;
-
-                                           int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
-                                           if (tmpCloudPercent < cloudPercentLimit)
-                                           {
-                                               int cloudPixels = 0;
-                                               for (int i = 0; i < tileSize; i++)
+                                       for (var k = 0; k < 3; k++)
+                                           for (var i = 0; i < tileSize; i++)
+                                               for (var j = 0; j < tileSize; j++)
                                                {
-                                                   for (int j = 0; j < tileSize; j++)
+                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                   input[0, k, i, j] = Math.Abs(Convert.ToSingle((tmpTileDataRGB16[index] - 1175) / 0.25));
+                                               }
+                                       double tmpCloudPercent;
+                                       byte[,] tmpMask = GetMask(session, tileSize, input, out tmpCloudPercent);
+                                       tmpMask = Dilate(tmpMask, dilation);
+
+                                       task.Wait();
+                                       if (!File.Exists(filePath))
+                                           continue;
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileData = new int[bandsCount * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+
+                                       if (tmpTileData.All(b => b == 0))
+                                           continue;
+
+                                       int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
+                                       if (tmpCloudPercent < cloudPercentLimit)
+                                       {
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                   {
+                                                       mainMask[j, j] = tmpMask[i, j];
+                                                       for (int k = 0; k < bandsCount; k++)
+                                                       {
+                                                           var index = i * tileSize + j + k * tileSize * tileSize;
+                                                           mainTileData[index] = tmpTileData[index];
+                                                       }
+                                                   }
+                                                   if (tmpMask[i, j] is 2 or 3 or 4)
+                                                       cloudPixels++;
+                                               }
+                                           }
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
+                                       }
+                                       else
+                                       {
+                                           int samePixels = 0;
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (mainMask[i, j] == tmpMask[i, j])
+                                                       samePixels++;
+                                                   if (mainMask[i, j] is 2 or 3 or 4)
                                                    {
                                                        if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
                                                        {
-                                                           mainMask[j, j] = tmpMask[i, j];
-                                                           for (int k = 0; k < bandsCount; k++)
+                                                           if (tmpMask[i, j] is 1)
                                                            {
-                                                               var index = i * tileSize + j + k * tileSize * tileSize;
-                                                               mainTileData[index] = tmpTileData[index];
+                                                               mainMask[i, j] = tmpMask[i, j];
+                                                               for (int k = 0; k < bandsCount; k++)
+                                                               {
+                                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                                   mainTileData[index] = tmpTileData[index];
+                                                               }
                                                            }
-                                                       }
-                                                       if (tmpMask[i, j] is 2 or 3 or 4)
-                                                           cloudPixels++;
-                                                   }
-                                               }
-                                               cloudPercent = (double)cloudPixels / (tileSize * tileSize);
-                                           }
-                                           else
-                                           {
-                                               int samePixels = 0;
-                                               int cloudPixels = 0;
-                                               for (int i = 0; i < tileSize; i++)
-                                               {
-                                                   for (int j = 0; j < tileSize; j++)
-                                                   {
-                                                       if (mainMask[i, j] == tmpMask[i, j])
-                                                           samePixels++;
-                                                       if (mainMask[i, j] is 2 or 3 or 4)
-                                                       {
-                                                           if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                           else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
                                                            {
-                                                               if (tmpMask[i, j] is 1)
+                                                               mainMask[i, j] = tmpMask[i, j];
+                                                               for (int k = 0; k < bandsCount; k++)
                                                                {
-                                                                   mainMask[i, j] = tmpMask[i, j];
-                                                                   for (int k = 0; k < bandsCount; k++)
-                                                                   {
-                                                                       var index = i * tileSize + j + k * tileSize * tileSize;
-                                                                       mainTileData[index] = tmpTileData[index];
-                                                                   }
+                                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                                   mainTileData[index] = tmpTileData[index];
                                                                }
-                                                               else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
-                                                               {
-                                                                   mainMask[i, j] = tmpMask[i, j];
-                                                                   for (int k = 0; k < bandsCount; k++)
-                                                                   {
-                                                                       var index = i * tileSize + j + k * tileSize * tileSize;
-                                                                       mainTileData[index] = tmpTileData[index];
-                                                                   }
-                                                                   cloudPixels++;
-                                                               }
-                                                               else
-                                                                   cloudPixels++;
+                                                               cloudPixels++;
                                                            }
                                                            else
                                                                cloudPixels++;
                                                        }
+                                                       else
+                                                           cloudPixels++;
                                                    }
                                                }
-                                               if ((double)samePixels / (tileSize * tileSize) > correlationLimit)
-                                                   sameMaskCount++;
-                                               cloudPercent = (double)cloudPixels / (tileSize * tileSize);
                                            }
-                                           if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
-                                           {
-                                               isEndWork = true;
-                                               break;
-                                           }
+                                           if ((double)samePixels / (tileSize * tileSize) > correlationLimit)
+                                               sameMaskCount++;
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
                                        }
-                                       if (isEndWork)
+                                       if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
                                            break;
                                    }
                                    catch (Exception) { }
@@ -716,130 +709,121 @@ internal partial class Program
                                mainMask = Dilate(mainMask, dilation);
 
                                int sameMaskCount = 0;
-                               bool isEndWork = false;
                                var tmpStartDate = startDate.AddDays(-dayReserve);
-                               for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
+                               for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= tmpStartDate; startSearchDate = startSearchDate.AddDays(-dayStep))
                                {
                                    try
                                    {
-                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= tmpStartDate; startSearchDate = startSearchDate.AddDays(-dayStep))
-                                       {
-                                           DateTime endSearchDate = startSearchDate.AddDays(dayStep);
-                                           var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
-                                           bandsRGB16 = Enumerable.Range(1, 5).ToArray();
-                                           urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
-                                           url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                       DateTime endSearchDate = startSearchDate.AddDays(dayStep);
+                                       var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 100).Result;
+                                       bandsRGB16 = Enumerable.Range(1, 5).ToArray();
+                                       urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                       url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
 
-                                           filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
-                                           DownloadFileAsync(urlRGB16, filePath).Wait();
-                                           if (!File.Exists(filePath))
-                                               continue;
-                                           tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                           var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
-                                           tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
-                                           tile.Dispose();
-                                           File.Delete(filePath);
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       DownloadFileAsync(urlRGB16, filePath).Wait();
+                                       if (!File.Exists(filePath))
+                                           continue;
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileDataRGB16 = new int[4 * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
 
-                                           filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
-                                           var task = DownloadFileAsync(url, filePath);
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.png";
+                                       var task = DownloadFileAsync(url, filePath);
 
-                                           for (var k = 0; k < 3; k++)
-                                               for (var i = 0; i < tileSize; i++)
-                                                   for (var j = 0; j < tileSize; j++)
-                                                   {
-                                                       var index = i * tileSize + j + k * tileSize * tileSize;
-                                                       input[0, k, i, j] = Math.Abs(Convert.ToSingle((tmpTileDataRGB16[index] - 1175) / 0.25));
-                                                   }
-                                           double tmpCloudPercent;
-                                           byte[,] tmpMask = GetMask(session, tileSize, input, out tmpCloudPercent);
-                                           tmpMask = Dilate(tmpMask, dilation);
-
-                                           task.Wait();
-                                           if (!File.Exists(filePath))
-                                               continue;
-                                           tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                           var tmpTileData = new byte[bandsCount * tileSize * tileSize];
-                                           tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
-                                           tile.Dispose();
-                                           File.Delete(filePath);
-
-                                           if (tmpTileData.All(b => b == 0))
-                                               continue;
-                                           int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
-                                           if (tmpCloudPercent < cloudPercentLimit)
-                                           {
-                                               int cloudPixels = 0;
-                                               for (int i = 0; i < tileSize; i++)
+                                       for (var k = 0; k < 3; k++)
+                                           for (var i = 0; i < tileSize; i++)
+                                               for (var j = 0; j < tileSize; j++)
                                                {
-                                                   for (int j = 0; j < tileSize; j++)
+                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                   input[0, k, i, j] = Math.Abs(Convert.ToSingle((tmpTileDataRGB16[index] - 1175) / 0.25));
+                                               }
+                                       double tmpCloudPercent;
+                                       byte[,] tmpMask = GetMask(session, tileSize, input, out tmpCloudPercent);
+                                       tmpMask = Dilate(tmpMask, dilation);
+
+                                       task.Wait();
+                                       if (!File.Exists(filePath))
+                                           continue;
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       var tmpTileData = new byte[bandsCount * tileSize * tileSize];
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+
+                                       if (tmpTileData.All(b => b == 0))
+                                           continue;
+                                       int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
+                                       if (tmpCloudPercent < cloudPercentLimit)
+                                       {
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                   {
+                                                       mainMask[j, j] = tmpMask[i, j];
+                                                       for (int k = 0; k < bandsCount; k++)
+                                                       {
+                                                           var index = i * tileSize + j + k * tileSize * tileSize;
+                                                           mainTileData[index] = tmpTileData[index];
+                                                       }
+                                                   }
+                                                   if (tmpMask[i, j] is 2 or 3 or 4)
+                                                       cloudPixels++;
+                                               }
+                                           }
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
+                                       }
+                                       else
+                                       {
+                                           int samePixels = 0;
+                                           int cloudPixels = 0;
+                                           for (int i = 0; i < tileSize; i++)
+                                           {
+                                               for (int j = 0; j < tileSize; j++)
+                                               {
+                                                   if (mainMask[i, j] == tmpMask[i, j])
+                                                       samePixels++;
+                                                   if (mainMask[i, j] is 2 or 3 or 4)
                                                    {
                                                        if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
                                                        {
-                                                           mainMask[j, j] = tmpMask[i, j];
-                                                           for (int k = 0; k < bandsCount; k++)
+                                                           if (tmpMask[i, j] is 1)
                                                            {
-                                                               var index = i * tileSize + j + k * tileSize * tileSize;
-                                                               mainTileData[index] = tmpTileData[index];
+                                                               mainMask[i, j] = tmpMask[i, j];
+                                                               for (int k = 0; k < bandsCount; k++)
+                                                               {
+                                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                                   mainTileData[index] = tmpTileData[index];
+                                                               }
                                                            }
-                                                       }
-                                                       if (tmpMask[i, j] is 2 or 3 or 4)
-                                                           cloudPixels++;
-                                                   }
-                                               }
-                                               cloudPercent = (double)cloudPixels / (tileSize * tileSize);
-                                           }
-                                           else
-                                           {
-                                               int samePixels = 0;
-                                               int cloudPixels = 0;
-                                               for (int i = 0; i < tileSize; i++)
-                                               {
-                                                   for (int j = 0; j < tileSize; j++)
-                                                   {
-                                                       if (mainMask[i, j] == tmpMask[i, j])
-                                                           samePixels++;
-                                                       if (mainMask[i, j] is 2 or 3 or 4)
-                                                       {
-                                                           if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                           else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
                                                            {
-                                                               if (tmpMask[i, j] is 1)
+                                                               mainMask[i, j] = tmpMask[i, j];
+                                                               for (int k = 0; k < bandsCount; k++)
                                                                {
-                                                                   mainMask[i, j] = tmpMask[i, j];
-                                                                   for (int k = 0; k < bandsCount; k++)
-                                                                   {
-                                                                       var index = i * tileSize + j + k * tileSize * tileSize;
-                                                                       mainTileData[index] = tmpTileData[index];
-                                                                   }
+                                                                   var index = i * tileSize + j + k * tileSize * tileSize;
+                                                                   mainTileData[index] = tmpTileData[index];
                                                                }
-                                                               else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
-                                                               {
-                                                                   mainMask[i, j] = tmpMask[i, j];
-                                                                   for (int k = 0; k < bandsCount; k++)
-                                                                   {
-                                                                       var index = i * tileSize + j + k * tileSize * tileSize;
-                                                                       mainTileData[index] = tmpTileData[index];
-                                                                   }
-                                                                   cloudPixels++;
-                                                               }
-                                                               else
-                                                                   cloudPixels++;
+                                                               cloudPixels++;
                                                            }
                                                            else
                                                                cloudPixels++;
                                                        }
+                                                       else
+                                                           cloudPixels++;
                                                    }
                                                }
-                                               if ((double)samePixels / (tileSize * tileSize) > correlationLimit)
-                                                   sameMaskCount++;
-                                               cloudPercent = (double)cloudPixels / (tileSize * tileSize);
                                            }
-                                           if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
-                                           {
-                                               isEndWork = true;
-                                               break;
-                                           }
+                                           if ((double)samePixels / (tileSize * tileSize) > correlationLimit)
+                                               sameMaskCount++;
+                                           cloudPercent = (double)cloudPixels / (tileSize * tileSize);
                                        }
-                                       if (isEndWork)
+                                       if (sameMaskCount >= maxSimilarTilesCount || cloudPercent < cloudPercentLimit)
                                            break;
                                    }
                                    catch (Exception) { }
