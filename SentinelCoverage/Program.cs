@@ -21,7 +21,6 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
-        {"Test1", new Tuple<double, double, double, double>(50.2, 53.35, 50.4, 53.25)},
         {"Test", new Tuple<double, double, double, double>(50, 53.35, 50.4, 53.1)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
@@ -43,6 +42,7 @@ internal partial class Program
         {"LandCover9Classes", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=data&colormap_name=io-lulc-9-class&exitwhenfull=False&skipcovered=False&collection=io-lulc-annual-v02&format=png"},
         {"ESAWorldCover", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=map&colormap_name=esa-worldcover&collection=esa-worldcover&format=png"},
         {"RGBLandsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=red&assets=green&assets=blue&color_formula=gamma+RGB+2.7%2C+saturation+1.5%2C+sigmoidal+RGB+15+0.55&nodata=0&collection=landsat-c2-l2&format=png"},
+        {"RGB16Landsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=red&assets=green&assets=blue&nodata=0&collection=landsat-c2-l2&format=tif"},
         {"NDVILandsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true&expression=%28nir08-red%29%2F%28nir08%2Bred%29&nodata=0&rescale=-1%2C1&collection=landsat-c2-l2&format=png"}
     };
 
@@ -71,8 +71,8 @@ internal partial class Program
         var zoom = args.Length == 0 ? AnsiConsole.Ask("Масштабный уровень: ", 13) : int.Parse(args[1]);
 
         AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
-        var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2023-07-01") : args[2];
-        var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2023-08-01") : args[3];
+        var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2022-06-01") : args[2];
+        var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2022-07-01") : args[3];
         var clouds = args.Length == 0 ? AnsiConsole.Ask("Облачность: ", 30) : int.Parse(args[4]);
 
         var enableCloudDetection = args.Length == 0 ? AnsiConsole.Confirm("Обнаружение облачности: ", true) : args[5] == "y";
@@ -95,7 +95,7 @@ internal partial class Program
         var startCloudPercent = 30;
         var endCloudPercent = 60;
         var cloudPercentStep = 15;
-        var maxSimilarTilesCount = 7;
+        var maxSimilarTilesCount = 5;
         var correlationLimit = 0.9;
         var dayReserve = 10;
 
@@ -197,7 +197,7 @@ internal partial class Program
                 });
             Console.WriteLine($"Обнаружено облачных тайлов: {cloudTiles.Count}");
         }
-        if (dataType == "B08" || dataType == "RGB16")
+        if (dataType is "B08" or "RGB16" or "RGB16Landsat")
         {
             GdalBase.ConfigureAll();
             Gdal.AllRegister();
@@ -717,12 +717,12 @@ internal partial class Program
 
                                int sameMaskCount = 0;
                                bool isEndWork = false;
-                               startDate = startDate.AddDays(-dayReserve);
+                               var tmpStartDate = startDate.AddDays(-dayReserve);
                                for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
                                {
                                    try
                                    {
-                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= startDate; startSearchDate = startSearchDate.AddDays(-dayStep))
+                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= tmpStartDate; startSearchDate = startSearchDate.AddDays(-dayStep))
                                        {
                                            DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                            var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
@@ -765,7 +765,6 @@ internal partial class Program
 
                                            if (tmpTileData.All(b => b == 0))
                                                continue;
-
                                            int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
                                            if (tmpCloudPercent < cloudPercentLimit)
                                            {
