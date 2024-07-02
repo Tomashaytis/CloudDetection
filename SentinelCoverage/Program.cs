@@ -21,7 +21,7 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
-        {"Test", new Tuple<double, double, double, double>(50, 53.35, 50.4, 53.1)},
+        {"Test", new Tuple<double, double, double, double>(44.8621,48.9437,46.1070,47.2097)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
         {"Саратовская область", new Tuple<double, double, double, double>(42.3861, 52.9233, 50.9538, 50.2228)},
@@ -73,7 +73,7 @@ internal partial class Program
         AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
         var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2023-07-01") : args[2];
         var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2023-08-01") : args[3];
-        var clouds = args.Length == 0 ? AnsiConsole.Ask("Облачность: ", 30) : int.Parse(args[4]);
+        var clouds = args.Length == 0 ? AnsiConsole.Ask("Облачность: ", 100) : int.Parse(args[4]);
 
         var enableCloudDetection = args.Length == 0 ? AnsiConsole.Confirm("Обнаружение облачности: ", true) : args[5] == "y";
 
@@ -184,6 +184,11 @@ internal partial class Program
                                         double cloudPercent = GetCloudPercent(session, tileSize, input);
                                         if (cloudPercent > cloudPercentLimit)
                                             cloudTiles.Add(new Tuple<int, int>(x, y1));
+                                    }
+                                    else
+                                    {
+                                        failedTilesCount++;
+                                        continue;
                                     }
                                     break;
                                 }
