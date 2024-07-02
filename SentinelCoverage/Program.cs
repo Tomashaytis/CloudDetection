@@ -21,7 +21,7 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
-        {"Test", new Tuple<double, double, double, double>(44.8621,48.9437,46.1070,47.2097)},
+        {"Test", new Tuple<double, double, double, double>(45.6621,48.9437,46.1070,47.2097)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
         {"Саратовская область", new Tuple<double, double, double, double>(42.3861, 52.9233, 50.9538, 50.2228)},
@@ -94,7 +94,7 @@ internal partial class Program
         var dayStep = 6;
         var maxSimilarTilesCount = 5;
         var correlationLimit = 0.9;
-        var dayReserve = 10;
+        var dayReserve = 12;
 
         var urlTemplate = UrlTemplates[dataType];
         if (dataType == "RGB" && startDate.Year < 2022)
@@ -363,17 +363,39 @@ internal partial class Program
                            try
                            {
                                var mainTileData = new int[bandsCount * tileSize * tileSize];
-                               mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               lock (mainTileData)
+                               {
+                                   mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               }
 
-                               var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
-                               DownloadFileAsync(urlRGB16, filePath).Wait();
-                               if (!File.Exists(filePath))
-                                   return;
-                               var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                               var failedTilesCount = 0;
+                               string filePath;
+                               Dataset tile;
                                var mainTileDataRGB16 = new int[4 * tileSize * tileSize];
-                               tile.ReadRaster(0, 0, tileSize, tileSize, mainTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
-                               tile.Dispose();
-                               File.Delete(filePath);
+                               while (failedTilesCount <= 5)
+                               {
+                                   try
+                                   {
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       DownloadFileAsync(urlRGB16, filePath).Wait();
+                                       if (!File.Exists(filePath))
+                                       {
+                                           failedTilesCount++;
+                                           continue;
+                                       }
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, mainTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+                                       break;
+                                   }
+                                   catch (Exception)
+                                   {
+                                       failedTilesCount++;
+                                   }
+                               }
+                               if (failedTilesCount > 5)
+                                   return;
 
                                for (var k = 0; k < 3; k++)
                                    for (var i = 0; i < tileSize; i++)
@@ -507,7 +529,11 @@ internal partial class Program
                                    }
                                    catch (Exception) { }
                                }
-                               mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               lock (mosaicRgb)
+                               {
+                                   mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                   mosaicRgb.FlushCache();
+                               }
                            }
                            catch (Exception)
                            {
@@ -516,7 +542,6 @@ internal partial class Program
                            processed++;
                            downloadTask.Value = processed;
                        });
-                       mosaicRgb.FlushCache();
                        mosaicRgb.Dispose();
                    });
                 if (!finallyProcessed)
@@ -690,17 +715,39 @@ internal partial class Program
                            try
                            {
                                var mainTileData = new byte[bandsCount * tileSize * tileSize];
-                               mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               lock (mosaicRgb)
+                               {
+                                   mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               }
 
-                               var filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
-                               DownloadFileAsync(urlRGB16, filePath).Wait();
-                               if (!File.Exists(filePath))
-                                   return;
-                               var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                               var failedTilesCount = 0;
+                               string filePath;
+                               Dataset tile;
                                var mainTileDataRGB16 = new int[4 * tileSize * tileSize];
-                               tile.ReadRaster(0, 0, tileSize, tileSize, mainTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
-                               tile.Dispose();
-                               File.Delete(filePath);
+                               while (failedTilesCount <= 5)
+                               {
+                                   try
+                                   {
+                                       filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
+                                       DownloadFileAsync(urlRGB16, filePath).Wait();
+                                       if (!File.Exists(filePath))
+                                       {
+                                           failedTilesCount++;
+                                           continue;
+                                       }
+                                       tile = Gdal.Open(filePath, Access.GA_ReadOnly);
+                                       tile.ReadRaster(0, 0, tileSize, tileSize, mainTileDataRGB16, tileSize, tileSize, 4, bandsRGB16, 0, 0, 0);
+                                       tile.Dispose();
+                                       File.Delete(filePath);
+                                       break;
+                                   }
+                                   catch (Exception)
+                                   {
+                                       failedTilesCount++;
+                                   }
+                               }
+                               if (failedTilesCount > 5)
+                                   return;
 
                                for (var k = 0; k < 3; k++)
                                    for (var i = 0; i < tileSize; i++)
@@ -833,7 +880,11 @@ internal partial class Program
                                    }
                                    catch (Exception) { }
                                }
-                               mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                               lock (mosaicRgb)
+                               {
+                                   mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                   mosaicRgb.FlushCache();
+                               }
                            }
                            catch (Exception)
                            {
@@ -842,7 +893,6 @@ internal partial class Program
                            processed++;
                            downloadTask.Value = processed;
                        });
-                       mosaicRgb.FlushCache();
                        mosaicRgb.Dispose();
                    });
                 if (!finallyProcessed)
