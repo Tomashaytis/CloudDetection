@@ -381,12 +381,12 @@ internal partial class Program
 
                                int sameMaskCount = 0;
                                bool isEndWork = false;
-                               startDate = startDate.AddDays(-dayReserve);
+                              var tmpStartDate = startDate.AddDays(-dayReserve);
                                for (int searchCloudPercent = startCloudPercent; searchCloudPercent <= endCloudPercent; searchCloudPercent += cloudPercentStep)
                                {
                                    try
                                    {
-                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= startDate; startSearchDate = startSearchDate.AddDays(-dayStep))
+                                       for (DateTime startSearchDate = endDate.AddDays(-dayStep); startSearchDate >= tmpStartDate; startSearchDate = startSearchDate.AddDays(-dayStep))
                                        {
                                            DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                            var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, searchCloudPercent).Result;
