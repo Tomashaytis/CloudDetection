@@ -24,6 +24,7 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
+        {"Test1", new Tuple<double, double, double, double>(45.6621,48.9437,46.1070,48.7097)},
         {"Test", new Tuple<double, double, double, double>(45.6621,48.9437,46.1070,47.2097)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
@@ -40,7 +41,7 @@ internal partial class Program
     {
         {"RGB", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.2+Saturation+0.8+Sigmoidal+RGB+25+0.35&nodata=0&collection=sentinel-2-l2a&format=png"},
         {"RGB16", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&nodata=0&collection=sentinel-2-l2a&format=tif"},
-        {"B08", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B08&nodata=0&collection=sentinel-2-l2a&format=tif"},
+        {"B08", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B08&collection=sentinel-2-l2a&format=tif"},
         {"NDVI", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true&expression=%28B08-B04%29%2F%28B08%2BB04%29&rescale=-1%2C1&nodata=0&collection=sentinel-2-l2a&format=png"},
         {"LandCover9Classes", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=data&colormap_name=io-lulc-9-class&exitwhenfull=False&skipcovered=False&collection=io-lulc-annual-v02&format=png"},
         {"ESAWorldCover", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=map&colormap_name=esa-worldcover&collection=esa-worldcover&format=png"},
@@ -104,8 +105,10 @@ internal partial class Program
             urlTemplate = "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.7+Saturation+1.5+Sigmoidal+RGB+15+0.35&nodata=0&collection=sentinel-2-l2a&format=png";
 
         var bandsCount = 4;
-        if (dataType is "NDVI" or "NDVILandsat" or "B08")
+        if (dataType is "NDVI" or "NDVILandsat")
             bandsCount = 2;
+        else if (dataType is "B08")
+            bandsCount = 1;
 
         var planetaryComputerKey = GetPlanetaryComputerKey(dataType, startDate, endDate, clouds).Result;
 
@@ -192,6 +195,7 @@ internal partial class Program
                                             {
                                                 var index = i * tileSize + j + k * tileSize * tileSize;
                                                 var resIndex = i * tileSize * (xMax - xMin + 1) + j + shift + k * tileSize * tileSize * (xMax - xMin + 1);
+                                                buffer[resIndex] = tileData[index];
                                             }
                                     processed++;
                                 }
