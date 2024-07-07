@@ -25,7 +25,7 @@ internal partial class Program
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
         {"Test1", new Tuple<double, double, double, double>(45.6621,48.9437,46.1070,48.7097)},
-        {"Test", new Tuple<double, double, double, double>(45.6621,48.9437,46.1070,47.2097)},
+        {"Test", new Tuple<double, double, double, double>(44.6621,48.9437,46.1070,47.2097)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
         {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
         {"Саратовская область", new Tuple<double, double, double, double>(42.3861, 52.9233, 50.9538, 50.2228)},
@@ -397,9 +397,9 @@ internal partial class Program
                                                     tile.Dispose();
                                                     File.Delete(filePath);
 
-                                                    if (tmpTileData.All(b => b == 0))
+                                                    if (tmpTileDataRGB16.All(b => b == 0))
                                                         continue;
-                                                    int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
+                                                    int alphaChannel = 3 * tileSize * tileSize;
                                                     if (tmpCloudPercent < cloudPercentLimit)
                                                     {
                                                         int cloudPixels = 0;
@@ -407,7 +407,7 @@ internal partial class Program
                                                         {
                                                             for (int j = 0; j < tileSize; j++)
                                                             {
-                                                                if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                                if (tmpTileDataRGB16[i * tileSize + j + alphaChannel] != 0)
                                                                 {
                                                                     mainMask[i, j] = tmpMask[i, j];
                                                                     for (int k = 0; k < bandsCount; k++)
@@ -434,7 +434,7 @@ internal partial class Program
                                                                     samePixels++;
                                                                 if (mainMask[i, j] is 2 or 3 or 4)
                                                                 {
-                                                                    if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                                    if (tmpTileDataRGB16[i * tileSize + j + alphaChannel] != 0)
                                                                     {
                                                                         if (tmpMask[i, j] is 1)
                                                                         {
@@ -775,9 +775,9 @@ internal partial class Program
                                                     tile.Dispose();
                                                     File.Delete(filePath);
 
-                                                    if (tmpTileData.All(b => b == 0))
+                                                    if (tmpTileDataRGB16.All(b => b == 0))
                                                         continue;
-                                                    int alphaChannel = (bandsCount - 1) * tileSize * tileSize;
+                                                    int alphaChannel = 3 * tileSize * tileSize;
                                                     if (tmpCloudPercent < cloudPercentLimit)
                                                     {
                                                         int cloudPixels = 0;
@@ -785,7 +785,7 @@ internal partial class Program
                                                         {
                                                             for (int j = 0; j < tileSize; j++)
                                                             {
-                                                                if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                                if (tmpTileDataRGB16[i * tileSize + j + alphaChannel] != 0)
                                                                 {
                                                                     mainMask[i, j] = tmpMask[i, j];
                                                                     for (int k = 0; k < bandsCount; k++)
@@ -812,7 +812,7 @@ internal partial class Program
                                                                     samePixels++;
                                                                 if (mainMask[i, j] is 2 or 3 or 4)
                                                                 {
-                                                                    if (tmpTileData[i * tileSize + j + alphaChannel] != 0)
+                                                                    if (tmpTileDataRGB16[i * tileSize + j + alphaChannel] != 0)
                                                                     {
                                                                         if (tmpMask[i, j] is 1)
                                                                         {
