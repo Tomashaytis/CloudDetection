@@ -24,6 +24,7 @@ internal partial class Program
 {
     private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
     {
+        {"Test2", new Tuple<double, double, double, double>(44.6621,48.9437,46.1070,45.2097)},
         {"Test1", new Tuple<double, double, double, double>(45.6621,48.9437,46.1070,48.7097)},
         {"Test", new Tuple<double, double, double, double>(44.6621,48.9437,46.1070,47.2097)},
         {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
@@ -226,7 +227,6 @@ internal partial class Program
             if (failedTiles.Count > 0)
             {
                 var finallyProcessed = true;
-                Environment.Exit(0);
                 AnsiConsole.Progress()
                     .Columns(new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn(),
                         new RemainingTimeColumn(), new SpinnerColumn())
@@ -401,7 +401,7 @@ internal partial class Program
                                                         File.Delete(filePath);
 
                                                         if (tmpTileDataRGB16.All(b => b == 0))
-                                                            continue;
+                                                            break;
                                                         int alphaChannel = 3 * tileSize * tileSize;
                                                         if (tmpCloudPercent < cloudPercentLimit)
                                                         {
@@ -786,7 +786,7 @@ internal partial class Program
                                                         File.Delete(filePath);
 
                                                         if (tmpTileDataRGB16.All(b => b == 0))
-                                                            continue;
+                                                            break;
                                                         int alphaChannel = 3 * tileSize * tileSize;
                                                         if (tmpCloudPercent < cloudPercentLimit)
                                                         {
