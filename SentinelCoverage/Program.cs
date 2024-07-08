@@ -284,9 +284,15 @@ internal partial class Program
                     if (enableMaskSaving)
                     {
                         beforeOutputMask = geoTiffDriver.Create("BeforeMask.tif", resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
+                        beforeOutputMask.SetProjection(
+    "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
+                        beforeOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                         beforeOutputMask.Dispose();
                         beforeOutputMask = Gdal.Open("BeforeMask.tif", Access.GA_Update);
                         afterOutputMask = geoTiffDriver.Create("AfterMask.tif", resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
+                        afterOutputMask.SetProjection(
+    "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
+                        afterOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                         afterOutputMask.Dispose();
                         afterOutputMask = Gdal.Open("AfterMask.tif", Access.GA_Update);
                     }
@@ -333,7 +339,7 @@ internal partial class Program
                                             var tileMask = ConvertMask(mainMask, tileSize);
                                             lock (beforeOutputMask)
                                             {
-                                                beforeOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 4, [1, 2, 3, 4], 0, 0, 0);
+                                                beforeOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 1, [1], 0, 0, 0);
                                                 beforeOutputMask.FlushCache();
                                             }
                                         }
@@ -490,7 +496,7 @@ internal partial class Program
                                             var tileMask = ConvertMask(mainMask, tileSize);
                                             lock (afterOutputMask)
                                             {
-                                                afterOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 4, [1, 2, 3, 4], 0, 0, 0);
+                                                afterOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 1, [1], 0, 0, 0);
                                                 afterOutputMask.FlushCache();
                                             }
                                         }
@@ -668,10 +674,16 @@ internal partial class Program
                     mosaicRgb = Gdal.Open(resFileName, Access.GA_Update);
                     if (enableMaskSaving)
                     {
-                        beforeOutputMask = geoTiffDriver.Create("BeforeMask.tif", resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
+                        beforeOutputMask = geoTiffDriver.Create("BeforeMask.tif", resHorSize, resVerSize, 1, DataType.GDT_Byte, null);
+                        beforeOutputMask.SetProjection(
+    "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
+                        beforeOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                         beforeOutputMask.Dispose();
                         beforeOutputMask = Gdal.Open("BeforeMask.tif", Access.GA_Update);
-                        afterOutputMask = geoTiffDriver.Create("AfterMask.tif", resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
+                        afterOutputMask = geoTiffDriver.Create("AfterMask.tif", resHorSize, resVerSize, 1, DataType.GDT_Byte, null);
+                        afterOutputMask.SetProjection(
+    "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
+                        afterOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                         afterOutputMask.Dispose();
                         afterOutputMask = Gdal.Open("AfterMask.tif", Access.GA_Update);
                     }
@@ -718,7 +730,7 @@ internal partial class Program
                                             var tileMask = ConvertMask(mainMask, tileSize);
                                             lock (beforeOutputMask)
                                             {
-                                                beforeOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 4, [1, 2, 3, 4], 0, 0, 0);
+                                                beforeOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 1, [1], 0, 0, 0);
                                                 beforeOutputMask.FlushCache();
                                             }
                                         }
@@ -875,7 +887,7 @@ internal partial class Program
                                             var tileMask = ConvertMask(mainMask, tileSize);
                                             lock (afterOutputMask)
                                             {
-                                                afterOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 4, [1, 2, 3, 4], 0, 0, 0);
+                                                afterOutputMask.WriteRaster((x - xMin) * tileSize, (y1 - yMin) * tileSize, tileSize, tileSize, tileMask, tileSize, tileSize, 1, [1], 0, 0, 0);
                                                 afterOutputMask.FlushCache();
                                             }
                                         }
@@ -1195,43 +1207,12 @@ internal partial class Program
 
     private static byte[] ConvertMask(byte[,] mask, int tileSize)
     {
-        var result = new byte[4 * tileSize * tileSize];
+        var result = new byte[tileSize * tileSize];
         for (var i = 0; i < tileSize; i++)
             for (var j = 0; j < tileSize; j++)
             {
-                var indexR = i * tileSize + j;
-                var indexG = i * tileSize + j + 1 * tileSize * tileSize;
-                var indexB = i * tileSize + j + 2 * tileSize * tileSize;
-                var indexA = i * tileSize + j + 3 * tileSize * tileSize;
-                result[indexA] = 255;
-                switch (mask[i, j])
-                {
-                    case 0:
-                        result[indexR] = 0;
-                        result[indexG] = 0;
-                        result[indexB] = 0;
-                        break;
-                    case 1:
-                        result[indexR] = 102;
-                        result[indexG] = 255;
-                        result[indexB] = 255;
-                        break;
-                    case 2:
-                        result[indexR] = 0;
-                        result[indexG] = 51;
-                        result[indexB] = 51;
-                        break;
-                    case 3:
-                        result[indexR] = 153;
-                        result[indexG] = 255;
-                        result[indexB] = 51;
-                        break;
-                    case 4:
-                        result[indexR] = 255;
-                        result[indexG] = 153;
-                        result[indexB] = 0;
-                        break;
-                }
+                var index = i * tileSize + j;
+                result[index] = mask[i, j];
             }
         return result;
     }
