@@ -1,0 +1,11 @@
+{
+  "RGB": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04\u0026assets=B03\u0026assets=B02\u0026color_formula=Gamma\u002BRGB\u002B3.2\u002BSaturation\u002B0.8\u002BSigmoidal\u002BRGB\u002B25\u002B0.35\u0026nodata=0\u0026collection=sentinel-2-l2a\u0026format=png",
+  "RGB16": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04\u0026assets=B03\u0026assets=B02\u0026nodata=0\u0026collection=sentinel-2-l2a\u0026format=tif",
+  "B08": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B08\u0026collection=sentinel-2-l2a\u0026format=tif",
+  "NDVI": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true\u0026expression=%28B08-B04%29%2F%28B08%2BB04%29\u0026rescale=-1%2C1\u0026nodata=0\u0026collection=sentinel-2-l2a\u0026format=png",
+  "LandCover9Classes": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=data\u0026colormap_name=io-lulc-9-class\u0026exitwhenfull=False\u0026skipcovered=False\u0026collection=io-lulc-annual-v02\u0026format=png",
+  "ESAWorldCover": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=map\u0026colormap_name=esa-worldcover\u0026collection=esa-worldcover\u0026format=png",
+  "RGBLandsat": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=red\u0026assets=green\u0026assets=blue\u0026color_formula=gamma\u002BRGB\u002B2.7%2C\u002Bsaturation\u002B1.5%2C\u002Bsigmoidal\u002BRGB\u002B15\u002B0.55\u0026nodata=0\u0026collection=landsat-c2-l2\u0026format=png",
+  "RGB16Landsat": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=red\u0026assets=green\u0026assets=blue\u0026nodata=0\u0026collection=landsat-c2-l2\u0026format=tif",
+  "NDVILandsat": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true\u0026expression=%28nir08-red%29%2F%28nir08%2Bred%29\u0026nodata=0\u0026rescale=-1%2C1\u0026collection=landsat-c2-l2\u0026format=png"
+}

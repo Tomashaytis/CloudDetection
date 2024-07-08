@@ -12,7 +12,10 @@ using System.Net.Http;
 using System.Reflection;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Text.Unicode;
 using System.Threading;
 using System.Threading.Tasks;
 using File = System.IO.File;
@@ -22,41 +25,22 @@ namespace SentinelCoverage;
 
 internal partial class Program
 {
-    private static readonly Dictionary<string, Tuple<double, double, double, double>> Regions = new()
-    {
-        {"Test2", new Tuple<double, double, double, double>(44.6621,48.9437,46.1070,45.2097)},
-        {"Test1", new Tuple<double, double, double, double>(45.6621,48.9437,46.1070,48.7097)},
-        {"Test", new Tuple<double, double, double, double>(44.6621,48.9437,46.1070,47.2097)},
-        {"Самарская область", new Tuple<double, double, double, double>(47.8460, 54.6538, 52.7056, 51.7471)},
-        {"Пермский край", new Tuple<double, double, double, double>(51.6543, 61.6747, 59.7085, 56.0313)},
-        {"Саратовская область", new Tuple<double, double, double, double>(42.3861, 52.9233, 50.9538, 50.2228)},
-        {"Амурская область", new Tuple<double, double, double, double>(119.301,57.188,135.698,48.513)},
-        {"Астраханская область", new Tuple<double, double, double, double>(44.8621,48.9437,50.1070,45.2097)},
-        {"Республика Дагестан", new Tuple<double, double, double, double>(45.0034, 45.0917, 48.9141, 41.0851)},
-        {"Волгоградская область", new Tuple<double, double, double, double>(41.0681, 51.3476, 47.5316, 47.3437)},
-        {"Оренбургская область", new Tuple<double, double, double, double>(50.6682, 54.4656, 61.7898, 50.3953)},
-        {"Ставропольский край", new Tuple<double, double, double, double>(40.7460, 46.1365, 45.8160, 43.7584)}
-    };
-
-    private static readonly Dictionary<string, string> UrlTemplates = new()
-    {
-        {"RGB", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.2+Saturation+0.8+Sigmoidal+RGB+25+0.35&nodata=0&collection=sentinel-2-l2a&format=png"},
-        {"RGB16", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&nodata=0&collection=sentinel-2-l2a&format=tif"},
-        {"B08", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B08&collection=sentinel-2-l2a&format=tif"},
-        {"NDVI", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true&expression=%28B08-B04%29%2F%28B08%2BB04%29&rescale=-1%2C1&nodata=0&collection=sentinel-2-l2a&format=png"},
-        {"LandCover9Classes", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=data&colormap_name=io-lulc-9-class&exitwhenfull=False&skipcovered=False&collection=io-lulc-annual-v02&format=png"},
-        {"ESAWorldCover", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=map&colormap_name=esa-worldcover&collection=esa-worldcover&format=png"},
-        {"RGBLandsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=red&assets=green&assets=blue&color_formula=gamma+RGB+2.7%2C+saturation+1.5%2C+sigmoidal+RGB+15+0.55&nodata=0&collection=landsat-c2-l2&format=png"},
-        {"RGB16Landsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=red&assets=green&assets=blue&nodata=0&collection=landsat-c2-l2&format=tif"},
-        {"NDVILandsat", "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?asset_as_band=true&expression=%28nir08-red%29%2F%28nir08%2Bred%29&nodata=0&rescale=-1%2C1&collection=landsat-c2-l2&format=png"}
-    };
-
     private static Task Main(string[] args)
     {
         GdalBase.ConfigureAll();
         Osr.SetPROJSearchPath("runtimes\\win-x64\\native\\maxrev.gdal.core.libshared");
 
         using var session = new InferenceSession("UNet_v2.onnx");
+
+        var options = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.BasicLatin, UnicodeRanges.Cyrillic),
+            WriteIndented = true
+        };
+        var regionsJSON = File.ReadAllBytes("../../../Properties/PublishProfiles/Regions.json");
+        var regions = JsonSerializer.Deserialize<Dictionary<string, Tuple<double, double, double, double>>>(regionsJSON, options);
+        var urlTemplatesJSON = File.ReadAllBytes("../../../Properties/PublishProfiles/UrlTemplates.json");
+        var urlTemplates = JsonSerializer.Deserialize<Dictionary<string, string>>(urlTemplatesJSON, options);
 
         AnsiConsole.Write(
             new FigletText("Planetary Data")
@@ -67,11 +51,11 @@ internal partial class Program
         var region = args.Length == 0 ? AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title("Область для загрузки")
-                .AddChoices(Regions.Keys)) : args[0];
-        var lonMin = Regions[region].Item1;
-        var latMax = Regions[region].Item2;
-        var lonMax = Regions[region].Item3;
-        var latMin = Regions[region].Item4;
+                .AddChoices(regions.Keys)) : args[0];
+        var lonMin = regions[region].Item1;
+        var latMax = regions[region].Item2;
+        var lonMax = regions[region].Item3;
+        var latMin = regions[region].Item4;
 
         var zoom = args.Length == 0 ? AnsiConsole.Ask("Масштабный уровень: ", 13) : int.Parse(args[1]);
 
@@ -88,7 +72,7 @@ internal partial class Program
         var dataType = args.Length == 0 ? AnsiConsole.Prompt(
             new SelectionPrompt<string>()
                 .Title("Тип данных")
-                .AddChoices(UrlTemplates.Keys)) : args[8];
+                .AddChoices(urlTemplates.Keys)) : args[8];
 
         AnsiConsole.WriteLine(region);
         AnsiConsole.WriteLine(dataType);
@@ -101,7 +85,7 @@ internal partial class Program
         var correlationLimit = 0.9;
         var dayReserve = 12;
 
-        var urlTemplate = UrlTemplates[dataType];
+        var urlTemplate = urlTemplates[dataType];
         if (dataType == "RGB" && startDate.Year < 2022)
             urlTemplate = "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.7+Saturation+1.5+Sigmoidal+RGB+15+0.35&nodata=0&collection=sentinel-2-l2a&format=png";
 
@@ -309,7 +293,7 @@ internal partial class Program
                         _ = Parallel.ForEach(tiles, (x, _) =>
                         {
                             var input = new DenseTensor<float>([1, 3, 512, 512]);
-                            var urlRGB16 = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, x, y1);
+                            var urlRGB16 = string.Format(urlTemplates["RGB16"], planetaryComputerKey, zoom, x, y1);
                             while (true)
                             {
                                 try
@@ -370,7 +354,7 @@ internal partial class Program
                                                     {
                                                         DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                                         var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 100).Result;
-                                                        urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                                        urlRGB16 = string.Format(urlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
                                                         var url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
 
                                                         filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
@@ -700,7 +684,7 @@ internal partial class Program
                         _ = Parallel.ForEach(tiles, (x, _) =>
                         {
                             var input = new DenseTensor<float>([1, 3, 512, 512]);
-                            var urlRGB16 = string.Format(UrlTemplates["RGB16"], planetaryComputerKey, zoom, x, y1);
+                            var urlRGB16 = string.Format(urlTemplates["RGB16"], planetaryComputerKey, zoom, x, y1);
                             while (true)
                             {
                                 try
@@ -761,7 +745,7 @@ internal partial class Program
                                                     {
                                                         DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                                         var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(dataType, startSearchDate, endSearchDate, 100).Result;
-                                                        urlRGB16 = string.Format(UrlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
+                                                        urlRGB16 = string.Format(urlTemplates["RGB16"], tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
                                                         var url = string.Format(urlTemplate, tmpPlanetaryComputerKey, zoom, tileIndex.Item1, tileIndex.Item2);
 
                                                         filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
