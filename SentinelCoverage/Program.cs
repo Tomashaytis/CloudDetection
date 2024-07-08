@@ -92,7 +92,10 @@ internal partial class Program
             endDate = DateTime.Parse(settings["Конечная дата"]);
             clouds = Int32.Parse(settings["Облачность"]);
             dataType = settings["Тип данных"];
-            urlTemplate = settings["Шаблон URL"];
+            if (urlTemplates.ContainsKey(dataType))
+                urlTemplate = urlTemplates[dataType];
+            else
+                urlTemplate = settings["Шаблон URL"];
             enableCloudDetection = settings["Обнаружение облачности"] == "y";
             enableMaskSaving = settings["Сохранение масок облачности"] == "y";
             AnsiConsole.Write(new Rule("[yellow]Тип данных[/]").RuleStyle("grey").LeftJustified());
