@@ -1,4 +1,5 @@
-﻿using MaxRev.Gdal.Core;
+﻿using Amazon.Runtime.Internal.Transform;
+using MaxRev.Gdal.Core;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OSGeo.GDAL;
@@ -31,7 +32,6 @@ internal partial class Program
         Osr.SetPROJSearchPath("runtimes\\win-x64\\native\\maxrev.gdal.core.libshared");
 
         using var session = new InferenceSession("UNet_v2.onnx");
-
         var options = new JsonSerializerOptions
         {
             Encoder = JavaScriptEncoder.Create(UnicodeRanges.BasicLatin, UnicodeRanges.Cyrillic),
@@ -41,43 +41,107 @@ internal partial class Program
         var regions = JsonSerializer.Deserialize<Dictionary<string, Tuple<double, double, double, double>>>(regionsJSON, options);
         var urlTemplatesJSON = File.ReadAllBytes("../../../Properties/PublishProfiles/UrlTemplates.json");
         var urlTemplates = JsonSerializer.Deserialize<Dictionary<string, string>>(urlTemplatesJSON, options);
+        var settingsJSON = File.ReadAllBytes("../../../Properties/PublishProfiles/Settings.json");
+        var settings = JsonSerializer.Deserialize<Dictionary<string, string>>(settingsJSON, options);
 
         AnsiConsole.Write(
             new FigletText("Planetary Data")
                 .LeftJustified()
         .Color(Spectre.Console.Color.Blue));
 
-        AnsiConsole.Write(new Rule("[yellow]Область для загрузки данных[/]").RuleStyle("grey").LeftJustified());
-        var region = args.Length == 0 ? AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("Область для загрузки")
-                .AddChoices(regions.Keys)) : args[0];
-        var lonMin = regions[region].Item1;
-        var latMax = regions[region].Item2;
-        var lonMax = regions[region].Item3;
-        var latMin = regions[region].Item4;
+        string region = "", dataType = "", urlTemplate = "";
+        int zoom, clouds;
+        double lonMin, lonMax, latMin, latMax;
+        bool enableCloudDetection, enableMaskSaving;
+        DateTime startDate, endDate;
 
-        var zoom = args.Length == 0 ? AnsiConsole.Ask("Масштабный уровень: ", 13) : int.Parse(args[1]);
+        var usingDefaultSettings = args.Length == 0 ? AnsiConsole.Confirm("Использовать настройки по умолчанию: ", false) : args[0] == "y";
+        if (usingDefaultSettings)
+        {
+            AnsiConsole.Write(new Rule("[yellow]Область для загрузки данных[/]").RuleStyle("grey").LeftJustified());
+            AnsiConsole.WriteLine($"Регион: {settings["Регион"]}");
+            region = settings["Регион"];
+            if (regions.ContainsKey(region))
+            {
+                lonMin = regions[region].Item1;
+                latMax = regions[region].Item2;
+                lonMax = regions[region].Item3;
+                latMin = regions[region].Item4;
+            }
+            else
+            {
+                AnsiConsole.WriteLine($"Минимум долготы: {settings["Минимум долготы"]}");
+                AnsiConsole.WriteLine($"Максимум долготы: {settings["Максимум долготы"]}");
+                AnsiConsole.WriteLine($"Минимум широты: {settings["Минимум широты"]}");
+                AnsiConsole.WriteLine($"Максимум широты: {settings["Максимум широты"]}");
+                lonMin = Double.Parse(settings["Минимум долготы"]);
+                latMax = Double.Parse(settings["Максимум широты"]);
+                lonMax = Double.Parse(settings["Максимум долготы"]);
+                latMin = Double.Parse(settings["Минимум широты"]);
+            }
+            AnsiConsole.WriteLine($"Масштабный уровень: {settings["Масштабный уровень"]}");
 
-        AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
-        var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2023-07-01") : args[2];
-        var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2023-08-01") : args[3];
-        var clouds = args.Length == 0 ? AnsiConsole.Ask("Облачность: ", 100) : int.Parse(args[4]);
-        var enableCloudDetection = args.Length == 0 ? AnsiConsole.Confirm("Обнаружение облачности: ", true) : args[5] == "y";
-        var enableMaskSaving = args.Length == 0 ? AnsiConsole.Confirm("Сохранение маскок облачности: ", false) : args[5] == "y";
+            AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
+            AnsiConsole.WriteLine($"Начальная дата: {settings["Начальная дата"]}");
+            AnsiConsole.WriteLine($"Конечная дата: {settings["Конечная дата"]}");
+            AnsiConsole.WriteLine($"Облачность: {settings["Облачность"]}");
+            AnsiConsole.WriteLine($"Обнаружение облачности: {settings["Обнаружение облачности"]}");
+            AnsiConsole.WriteLine($"Сохранение масок облачности: {settings["Сохранение масок облачности"]}");
+            zoom = Int32.Parse(settings["Масштабный уровень"]);
+            startDate = DateTime.Parse(settings["Начальная дата"]);
+            endDate = DateTime.Parse(settings["Конечная дата"]);
+            clouds = Int32.Parse(settings["Облачность"]);
+            dataType = settings["Тип данных"];
+            urlTemplate = settings["Шаблон URL"];
+            enableCloudDetection = settings["Обнаружение облачности"] == "y";
+            enableMaskSaving = settings["Сохранение масок облачности"] == "y";
+            AnsiConsole.Write(new Rule("[yellow]Тип данных[/]").RuleStyle("grey").LeftJustified());
+            AnsiConsole.WriteLine($"Тип данных: {dataType}");
+        }
+        else
+        {
+            regions.Add("Ввод координат", new Tuple<double, double, double, double>(0, 0, 0, 0));
+            AnsiConsole.Write(new Rule("[yellow]Область для загрузки данных[/]").RuleStyle("grey").LeftJustified());
+            region = args.Length == 0 ? AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Область для загрузки")
+                    .AddChoices(regions.Keys)) : args[1];
+            AnsiConsole.WriteLine($"Регион: {region}");
+            lonMin = regions[region].Item1;
+            latMax = regions[region].Item2;
+            lonMax = regions[region].Item3;
+            latMin = regions[region].Item4;
+            if (region == "Ввод координат")
+            {
+                lonMin = AnsiConsole.Ask<double>("Минимум долготы: ");
+                lonMax = AnsiConsole.Ask<double>("Максимум долготы: ");
+                latMin = AnsiConsole.Ask<double>("Минимум широты: ");
+                latMax = AnsiConsole.Ask<double>("Максимум широты: ");
+            }
 
-        var startDate = DateTime.Parse(startDateString);
-        var endDate = DateTime.Parse(endDateString);
+            zoom = args.Length == 0 ? AnsiConsole.Ask("Масштабный уровень: ", 13) : int.Parse(args[2]);
 
-        var dataType = args.Length == 0 ? AnsiConsole.Prompt(
-            new SelectionPrompt<string>()
-                .Title("Тип данных")
-                .AddChoices(urlTemplates.Keys)) : args[8];
+            AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
+            var startDateString = args.Length == 0 ? AnsiConsole.Ask("Начальная дата: ", "2023-07-01") : args[3];
+            var endDateString = args.Length == 0 ? AnsiConsole.Ask("Конечная дата: ", "2023-08-01") : args[4];
+            clouds = args.Length == 0 ? AnsiConsole.Ask("Облачность: ", 100) : int.Parse(args[5]);
+            enableCloudDetection = args.Length == 0 ? AnsiConsole.Confirm("Обнаружение облачности: ", true) : args[6] == "y";
+            enableMaskSaving = args.Length == 0 ? AnsiConsole.Confirm("Сохранение маскок облачности: ", false) : args[7] == "y";
 
-        AnsiConsole.WriteLine(region);
-        AnsiConsole.WriteLine(dataType);
+            startDate = DateTime.Parse(startDateString);
+            endDate = DateTime.Parse(endDateString);
 
-        enableCloudDetection = enableCloudDetection && dataType is "RGB" or "NDVI" or "B08" or "RGB16";
+            AnsiConsole.Write(new Rule("[yellow]Тип данных[/]").RuleStyle("grey").LeftJustified());
+            dataType = args.Length == 0 ? AnsiConsole.Prompt(
+                new SelectionPrompt<string>()
+                    .Title("Тип данных")
+                    .AddChoices(urlTemplates.Keys)) : args[8];
+            AnsiConsole.WriteLine($"Тип данных: {dataType}");
+
+            enableCloudDetection = enableCloudDetection && dataType is "RGB" or "NDVI" or "B08" or "RGB16";
+            urlTemplate = urlTemplates[dataType];
+        }
+
         var cloudPercentLimit = 0.01;
         var dilation = 10;
         var dayStep = 6;
@@ -85,7 +149,6 @@ internal partial class Program
         var correlationLimit = 0.9;
         var dayReserve = 12;
 
-        var urlTemplate = urlTemplates[dataType];
         if (dataType == "RGB" && startDate.Year < 2022)
             urlTemplate = "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.7+Saturation+1.5+Sigmoidal+RGB+15+0.35&nodata=0&collection=sentinel-2-l2a&format=png";
 
