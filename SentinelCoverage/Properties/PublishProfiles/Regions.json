@@ -1,62 +1,62 @@
 {
-  "Test1": {
-    "Item1": 45.6621,
-    "Item2": 48.9437,
-    "Item3": 46.107,
-    "Item4": 48.7097
+  "Test2": {
+    "LongitudeMin": 45.6621,
+    "LatitudeMax": 48.9437,
+    "LongitudeMax": 46.107,
+    "LatitudeMin": 48.7097
   },
   "Самарская область": {
-    "Item1": 47.846,
-    "Item2": 54.6538,
-    "Item3": 52.7056,
-    "Item4": 51.7471
+    "LongitudeMin": 47.846,
+    "LatitudeMax": 54.6538,
+    "LongitudeMax": 52.7056,
+    "LatitudeMin": 51.7471
   },
   "Пермский край": {
-    "Item1": 51.6543,
-    "Item2": 61.6747,
-    "Item3": 59.7085,
-    "Item4": 56.0313
+    "LongitudeMin": 51.6543,
+    "LatitudeMax": 61.6747,
+    "LongitudeMax": 59.7085,
+    "LatitudeMin": 56.0313
   },
   "Саратовская область": {
-    "Item1": 42.3861,
-    "Item2": 52.9233,
-    "Item3": 50.9538,
-    "Item4": 50.2228
+    "LongitudeMin": 42.3861,
+    "LatitudeMax": 52.9233,
+    "LongitudeMax": 50.9538,
+    "LatitudeMin": 50.2228
   },
   "Амурская область": {
-    "Item1": 119.301,
-    "Item2": 57.188,
-    "Item3": 135.698,
-    "Item4": 48.513
+    "LongitudeMin": 119.301,
+    "LatitudeMax": 57.188,
+    "LongitudeMax": 135.698,
+    "LatitudeMin": 48.513
   },
   "Астраханская область": {
-    "Item1": 44.8621,
-    "Item2": 48.9437,
-    "Item3": 50.107,
-    "Item4": 45.2097
+    "LongitudeMin": 44.8621,
+    "LatitudeMax": 48.9437,
+    "LongitudeMax": 50.107,
+    "LatitudeMin": 45.2097
   },
   "Республика Дагестан": {
-    "Item1": 45.0034,
-    "Item2": 45.0917,
-    "Item3": 48.9141,
-    "Item4": 41.0851
+    "LongitudeMin": 45.0034,
+    "LatitudeMax": 45.0917,
+    "LongitudeMax": 48.9141,
+    "LatitudeMin": 41.0851
   },
   "Волгоградская область": {
-    "Item1": 41.0681,
-    "Item2": 51.3476,
-    "Item3": 47.5316,
-    "Item4": 47.3437
+    "LongitudeMin": 41.0681,
+    "LatitudeMax": 51.3476,
+    "LongitudeMax": 47.5316,
+    "LatitudeMin": 47.3437
   },
   "Оренбургская область": {
-    "Item1": 50.6682,
-    "Item2": 54.4656,
-    "Item3": 61.7898,
-    "Item4": 50.3953
+    "LongitudeMin": 50.6682,
+    "LatitudeMax": 54.4656,
+    "LongitudeMax": 61.7898,
+    "LatitudeMin": 50.3953
   },
   "Ставропольский край": {
-    "Item1": 40.746,
-    "Item2": 46.1365,
-    "Item3": 45.816,
-    "Item4": 43.7584
+    "LongitudeMin": 40.746,
+    "LatitudeMax": 46.1365,
+    "LongitudeMax": 45.816,
+    "LatitudeMin": 43.7584
   }
 }
