@@ -41,7 +41,7 @@ internal partial class Program
         var regionsJSON = File.ReadAllBytes("Regions.json");
         var regions = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, double>>>(regionsJSON, options);
         var urlTemplatesJSON = File.ReadAllBytes("UrlTemplates.json");
-        var urlTemplates = JsonSerializer.Deserialize<Dictionary<string, string>>(urlTemplatesJSON, options);
+        var urlTemplates = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(urlTemplatesJSON, options);
 
         AnsiConsole.Write(
             new FigletText("Planetary Data")
@@ -59,10 +59,12 @@ internal partial class Program
         foreach (var settingsDict in settingsDictList)
         {
             var settings = new Settings();
+            var log = "";
             if (pathToSettings is not null)
             {
                 AnsiConsole.Write(new Rule("[yellow]Область для загрузки данных[/]").RuleStyle("grey").LeftJustified());
                 AnsiConsole.WriteLine($"Регион: {settingsDict["Регион"]}");
+                log += $"Регион: {settings.Region}\n";
                 settings.Region = settingsDict["Регион"];
                 if (regions.ContainsKey(settings.Region))
                 {
@@ -71,6 +73,10 @@ internal partial class Program
                     settings.LonMax = regions[settings.Region]["LongitudeMax"];
                     settings.LatMin = regions[settings.Region]["LatitudeMin"];
                     settings.ResFileName += $"{settings.Region}_";
+                    log += $"Минимум долготы: {settings.LonMin}\n";
+                    log += $"Максимум широты: {settings.LatMax}\n";
+                    log += $"Максимум долготы: {settings.LonMax}\n";
+                    log += $"Минимум широты: {settings.LatMin}\n";
                 }
                 else
                 {
@@ -84,8 +90,13 @@ internal partial class Program
                     settings.LonMax = Double.Parse(settingsDict["Максимум долготы"], englishCulture);
                     settings.LatMin = Double.Parse(settingsDict["Минимум широты"], englishCulture);
                     settings.ResFileName += $"Rect_{settings.LonMin}_{settings.LatMax}_{settings.LonMax}_{settings.LatMin}_";
+                    log += $"Минимум долготы: {settings.LonMin}\n";
+                    log += $"Максимум широты: {settings.LatMax}\n";
+                    log += $"Максимум долготы: {settings.LonMax}\n";
+                    log += $"Минимум широты: {settings.LatMin}\n";
                 }
                 AnsiConsole.WriteLine($"Масштабный уровень: {settingsDict["Масштабный уровень"]}");
+                log += $"Масштабный уровень: {settings.Zoom}\n";
 
                 AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
                 AnsiConsole.WriteLine($"Начальная дата: {settingsDict["Начальная дата"]}");
@@ -100,10 +111,31 @@ internal partial class Program
                 settings.EndDate = DateTime.Parse(endDateString);
                 settings.Clouds = Int32.Parse(settingsDict["Облачность"]);
                 settings.DataType = settingsDict["Тип данных"];
+                log += $"Начальная дата: {startDateString}\n";
+                log += $"Конечная дата: {endDateString}\n";
+                log += $"Облачность: {settings.Clouds}\n";
+                log += $"Обнаружение облачности: {(settings.EnableCloudDetection ? "y" : "n")}\n";
+                log += $"Сохранение маскок облачности: {(settings.EnableMaskSaving ? "y" : "n")}\n";
+                log += $"Тип данных: {settings.DataType}\n";
+
                 if (urlTemplates.ContainsKey(settings.DataType))
-                    settings.UrlTemplate = urlTemplates[settings.DataType];
+                {
+                    settings.UrlTemplate = urlTemplates[settings.DataType]["UrlTemplate"];
+                    settings.BandsCount = Int32.Parse(urlTemplates[settings.DataType]["BandsCount"]);
+                    settings.Format = urlTemplates[settings.DataType]["Format"];
+                    log += $"Шаблон URL: {settings.UrlTemplate}\n";
+                    log += $"Количество каналов: {settings.BandsCount}\n";
+                    log += $"Формат: {settings.Format}\n";
+                }
                 else
+                {
                     settings.UrlTemplate = settingsDict["Шаблон URL"];
+                    settings.BandsCount = Int32.Parse(settingsDict["Число каналов"]);
+                    settings.Format = settingsDict["Формат"];
+                    log += $"Шаблон URL: {settings.UrlTemplate}\n";
+                    log += $"Количество каналов: {settings.BandsCount}\n";
+                    log += $"Формат: {settings.Format}\n";
+                }
                 settings.EnableCloudDetection = settingsDict["Обнаружение облачности"] == "y";
                 settings.EnableMaskSaving = settingsDict["Сохранение масок облачности"] == "y";
                 AnsiConsole.Write(new Rule("[yellow]Тип данных[/]").RuleStyle("grey").LeftJustified());
@@ -112,7 +144,17 @@ internal partial class Program
                 settings.ResFileName += $"{settings.DataType}_{startDateString}_{endDateString}";
                 if (settings.EnableCloudDetection)
                     settings.ResFileName += $"_cloudless";
+                var curTime = DateTime.Now;
+                settings.LogName = $"{settings.ResFileName}.log";
+                settings.AfterMaskName = $"{settings.ResFileName}_AfterMask.tif";
+                settings.BeforeMaskName = $"{settings.ResFileName}_BeforeMask.tif";
                 settings.ResFileName += ".tif";
+                log += $"Файл: {settings.ResFileName}\n";
+                if (settings.EnableMaskSaving)
+                {
+                    log += $"Исходная маска облачности: {settings.BeforeMaskName}\n";
+                    log += $"Конечная маска облачности: {settings.AfterMaskName}\n";
+                }
             }
             else
             {
@@ -123,6 +165,7 @@ internal partial class Program
                         .Title("Область для загрузки")
                         .AddChoices(regions.Keys));
                 AnsiConsole.WriteLine($"Регион: {settings.Region}");
+                log += $"Регион: {settings.Region}\n";
                 if (settings.Region == "Ввод координат")
                 {
                     settings.LonMin = AnsiConsole.Ask<double>("Минимум долготы: ");
@@ -130,6 +173,10 @@ internal partial class Program
                     settings.LonMax = AnsiConsole.Ask<double>("Максимум долготы: ");
                     settings.LatMin = AnsiConsole.Ask<double>("Минимум широты: ");
                     settings.ResFileName += $"Rect_{settings.LonMin}_{settings.LatMax}_{settings.LonMax}_{settings.LatMin}_";
+                    log += $"Минимум долготы: {settings.LonMin}\n";
+                    log += $"Максимум широты: {settings.LatMax}\n";
+                    log += $"Максимум долготы: {settings.LonMax}\n";
+                    log += $"Минимум широты: {settings.LatMin}\n";
                 }
                 else
                 {
@@ -137,10 +184,15 @@ internal partial class Program
                     settings.LatMax = regions[settings.Region]["LatitudeMax"];
                     settings.LonMax = regions[settings.Region]["LongitudeMax"];
                     settings.LatMin = regions[settings.Region]["LatitudeMin"];
+                    log += $"Минимум долготы: {settings.LonMin}\n";
+                    log += $"Максимум широты: {settings.LatMax}\n";
+                    log += $"Максимум долготы: {settings.LonMax}\n";
+                    log += $"Минимум широты: {settings.LatMin}\n";
                     settings.ResFileName += $"{settings.Region}_";
                 }
 
                 settings.Zoom = AnsiConsole.Ask("Масштабный уровень: ", 13);
+                log += $"Масштабный уровень: {settings.Zoom}\n";
 
                 AnsiConsole.Write(new Rule("[yellow]Временной промежуток и облачность[/]").RuleStyle("grey").LeftJustified());
                 var startDateString = AnsiConsole.Ask("Начальная дата: ", "2023-07-01");
@@ -148,6 +200,11 @@ internal partial class Program
                 settings.Clouds = AnsiConsole.Ask("Облачность: ", 100);
                 settings.EnableCloudDetection = AnsiConsole.Confirm("Обнаружение облачности: ", true);
                 settings.EnableMaskSaving = AnsiConsole.Confirm("Сохранение маскок облачности: ", false);
+                log += $"Начальная дата: {startDateString}\n";
+                log += $"Конечная дата: {endDateString}\n";
+                log += $"Облачность: {settings.Clouds}\n";
+                log += $"Обнаружение облачности: {(settings.EnableCloudDetection ? "y": "n")}\n";
+                log += $"Сохранение маскок облачности: {(settings.EnableMaskSaving ? "y": "n")}\n";
 
                 settings.StartDate = DateTime.Parse(startDateString);
                 settings.EndDate = DateTime.Parse(endDateString);
@@ -158,14 +215,29 @@ internal partial class Program
                         .Title("Тип данных")
                         .AddChoices(urlTemplates.Keys));
                 AnsiConsole.WriteLine($"Тип данных: {settings.DataType}");
+                log += $"Тип данных: {settings.DataType}\n";
 
-                settings.EnableCloudDetection = settings.EnableCloudDetection && settings.DataType is "RGB" or "NDVI" or "B08" or "RGB16";
-                settings.UrlTemplate = urlTemplates[settings.DataType];
+                settings.UrlTemplate = urlTemplates[settings.DataType]["UrlTemplate"];
+                settings.BandsCount = Int32.Parse(urlTemplates[settings.DataType]["BandsCount"]);
+                settings.Format = urlTemplates[settings.DataType]["Format"];
+                log += $"Шаблон URL: {settings.UrlTemplate}\n";
+                log += $"Количество каналов: {settings.BandsCount}\n";
+                log += $"Формат: {settings.Format}\n";
 
                 settings.ResFileName += $"{settings.DataType}_{startDateString}_{endDateString}";
                 if (settings.EnableCloudDetection)
                     settings.ResFileName += $"_cloudless";
+                var curTime = DateTime.Now;
+                settings.LogName = $"{settings.ResFileName}.log";
+                settings.AfterMaskName = $"{settings.ResFileName}_AfterMask.tif";
+                settings.BeforeMaskName = $"{settings.ResFileName}_BeforeMask.tif";
                 settings.ResFileName += ".tif";
+                log += $"Файл: {settings.ResFileName}\n";
+                if (settings.EnableMaskSaving)
+                {
+                    log += $"Исходная маска облачности: {settings.BeforeMaskName}\n";
+                    log += $"Конечная маска облачности: {settings.AfterMaskName}\n";
+                }
             }
 
             var cloudPercentLimit = 0.01;
@@ -177,12 +249,6 @@ internal partial class Program
 
             if (settings.DataType == "RGB" && settings.StartDate.Year < 2022)
                 settings.UrlTemplate = "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/tiles/{0}/WebMercatorQuad/{1}/{2}/{3}@2x?assets=B04&assets=B03&assets=B02&color_formula=Gamma+RGB+3.7+Saturation+1.5+Sigmoidal+RGB+15+0.35&nodata=0&collection=sentinel-2-l2a&format=png";
-
-            var bandsCount = 4;
-            if (settings.DataType is "NDVI" or "NDVILandsat")
-                bandsCount = 2;
-            else if (settings.DataType is "B08")
-                bandsCount = 1;
 
             var planetaryComputerKey = GetPlanetaryComputerKey(settings.DataType, settings.StartDate, settings.EndDate, settings.Clouds).Result;
 
@@ -206,19 +272,21 @@ internal partial class Program
 
             Dataset beforeOutputMask = null;
             Dataset afterOutputMask = null;
+            TimeSpan spendTimeForDownload = new TimeSpan(), spendTimeForReplaceClouds = new TimeSpan();
 
-            if (settings.DataType is "B08" or "RGB16" or "RGB16Landsat")
+            if (settings.Format is "tif")
             {
+                var timer = new Stopwatch();
                 GdalBase.ConfigureAll();
                 Gdal.AllRegister();
                 var geoTiffDriver = Gdal.GetDriverByName("GTiff");
                 File.Delete(settings.ResFileName);
-                var mosaicRgb = geoTiffDriver.Create(settings.ResFileName, resHorSize, resVerSize, bandsCount, DataType.GDT_Int16, null);
+                var mosaicRgb = geoTiffDriver.Create(settings.ResFileName, resHorSize, resVerSize, settings.BandsCount, DataType.GDT_Int16, null);
                 mosaicRgb.SetProjection(
                     "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
                 mosaicRgb.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                 mosaicRgb.Dispose();
-                var bands = Enumerable.Range(1, bandsCount + 1).ToArray();
+                var bands = Enumerable.Range(1, settings.BandsCount + 1).ToArray();
                 var ext = "tif";
 
                 var processed = 0;
@@ -243,7 +311,7 @@ internal partial class Program
                                 tiles.Add(x);
                             }
 
-                            var buffer = new int[bandsCount * tileSize * tileSize * (xMax - xMin + 1)];
+                            var buffer = new int[settings.BandsCount * tileSize * tileSize * (xMax - xMin + 1)];
 
                             var y1 = y;
                             Parallel.ForEach(tiles, (x, _) =>
@@ -254,14 +322,14 @@ internal partial class Program
                                     var filePath = $"{x}_{y1}.{ext}";
                                     DownloadFileAsync(url, filePath).Wait();
                                     var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                    var tileData = new int[bandsCount * tileSize * tileSize];
-                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                    var tileData = new int[settings.BandsCount * tileSize * tileSize];
+                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                     tile.Dispose();
                                     File.Delete(filePath);
                                     lock (buffer)
                                     {
                                         var shift = (x - xMin) * tileSize;
-                                        for (var k = 0; k < bandsCount; k++)
+                                        for (var k = 0; k < settings.BandsCount; k++)
                                             for (var i = 0; i < tileSize; i++)
                                                 for (var j = 0; j < tileSize; j++)
                                                 {
@@ -290,7 +358,7 @@ internal partial class Program
 
                             mosaicRgb.WriteRaster(0, (y - yMin) * tileSize, tileSize * (xMax - xMin + 1), tileSize, buffer,
                                 tileSize * (xMax - xMin + 1),
-                                tileSize, bandsCount, bands, 0, 0, 0);
+                                tileSize, settings.BandsCount, bands, 0, 0, 0);
                             mosaicRgb.FlushCache();
                             mosaicRgb.Dispose();
                         }
@@ -318,11 +386,11 @@ internal partial class Program
                                     DownloadFileAsync(url, filePath).Wait();
                                     var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
 
-                                    var tileData = new byte[bandsCount * tileSize * tileSize];
-                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                    var tileData = new byte[settings.BandsCount * tileSize * tileSize];
+                                    tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                     tile.Dispose();
                                     File.Delete(filePath);
-                                    mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                    mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, tileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                 }
                                 catch (Exception)
                                 {
@@ -340,6 +408,9 @@ internal partial class Program
                     if (!finallyProcessed)
                         AnsiConsole.Write("Есть битые тайлы");
                 }
+                timer.Stop();
+                spendTimeForDownload = timer.Elapsed;
+                timer = new Stopwatch();
                 if (settings.EnableCloudDetection)
                 {
                     var finallyProcessed = true;
@@ -354,18 +425,18 @@ internal partial class Program
                         mosaicRgb = Gdal.Open(settings.ResFileName, Access.GA_Update);
                         if (settings.EnableMaskSaving)
                         {
-                            beforeOutputMask = geoTiffDriver.Create("BeforeMask.tif", resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
+                            beforeOutputMask = geoTiffDriver.Create(settings.BeforeMaskName, resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
                             beforeOutputMask.SetProjection(
         "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
                             beforeOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                             beforeOutputMask.Dispose();
-                            beforeOutputMask = Gdal.Open("BeforeMask.tif", Access.GA_Update);
-                            afterOutputMask = geoTiffDriver.Create("AfterMask.tif", resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
+                            beforeOutputMask = Gdal.Open(settings.BeforeMaskName, Access.GA_Update);
+                            afterOutputMask = geoTiffDriver.Create(settings.AfterMaskName, resHorSize, resVerSize, 4, DataType.GDT_Byte, null);
                             afterOutputMask.SetProjection(
         "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
                             afterOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                             afterOutputMask.Dispose();
-                            afterOutputMask = Gdal.Open("AfterMask.tif", Access.GA_Update);
+                            afterOutputMask = Gdal.Open(settings.AfterMaskName, Access.GA_Update);
                         }
 
                         for (var y = yMin; y <= yMax; y++)
@@ -380,7 +451,7 @@ internal partial class Program
                             _ = Parallel.ForEach(tiles, (x, _) =>
                             {
                                 var input = new DenseTensor<float>([1, 3, 512, 512]);
-                                var urlRGB16 = string.Format(urlTemplates["RGB16"], planetaryComputerKey, settings.Zoom, x, y1);
+                                var urlRGB16 = string.Format(urlTemplates["RGB16"]["UrlTemplate"], planetaryComputerKey, settings.Zoom, x, y1);
                                 while (true)
                                 {
                                     try
@@ -417,10 +488,10 @@ internal partial class Program
                                             if (cloudPercent > cloudPercentLimit)
                                             {
                                                 var tileIndex = new Tuple<int, int>(x, y1);
-                                                var mainTileData = new int[bandsCount * tileSize * tileSize];
+                                                var mainTileData = new int[settings.BandsCount * tileSize * tileSize];
                                                 lock (mosaicRgb)
                                                 {
-                                                    mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                                    mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                                 }
                                                 for (var k = 0; k < 3; k++)
                                                     for (var i = 0; i < tileSize; i++)
@@ -438,7 +509,7 @@ internal partial class Program
                                                     {
                                                         DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                                         var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(settings.DataType, startSearchDate, endSearchDate, 100).Result;
-                                                        urlRGB16 = string.Format(urlTemplates["RGB16"], tmpPlanetaryComputerKey, settings.Zoom, tileIndex.Item1, tileIndex.Item2);
+                                                        urlRGB16 = string.Format(urlTemplates["RGB16"]["UrlTemplate"], tmpPlanetaryComputerKey, settings.Zoom, tileIndex.Item1, tileIndex.Item2);
                                                         var url = string.Format(settings.UrlTemplate, tmpPlanetaryComputerKey, settings.Zoom, tileIndex.Item1, tileIndex.Item2);
 
                                                         filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
@@ -469,8 +540,8 @@ internal partial class Program
                                                         if (!File.Exists(filePath))
                                                             continue;
                                                         tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                                        var tmpTileData = new int[bandsCount * tileSize * tileSize];
-                                                        tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                                        var tmpTileData = new int[settings.BandsCount * tileSize * tileSize];
+                                                        tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                                         tile.Dispose();
                                                         File.Delete(filePath);
 
@@ -487,7 +558,7 @@ internal partial class Program
                                                                     if (tmpTileDataRGB16[i * tileSize + j + alphaChannel] != 0)
                                                                     {
                                                                         mainMask[i, j] = tmpMask[i, j];
-                                                                        for (int k = 0; k < bandsCount; k++)
+                                                                        for (int k = 0; k < settings.BandsCount; k++)
                                                                         {
                                                                             var index = i * tileSize + j + k * tileSize * tileSize;
                                                                             mainTileData[index] = tmpTileData[index];
@@ -516,7 +587,7 @@ internal partial class Program
                                                                             if (tmpMask[i, j] is 1)
                                                                             {
                                                                                 mainMask[i, j] = tmpMask[i, j];
-                                                                                for (int k = 0; k < bandsCount; k++)
+                                                                                for (int k = 0; k < settings.BandsCount; k++)
                                                                                 {
                                                                                     var index = i * tileSize + j + k * tileSize * tileSize;
                                                                                     mainTileData[index] = tmpTileData[index];
@@ -525,7 +596,7 @@ internal partial class Program
                                                                             else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
                                                                             {
                                                                                 mainMask[i, j] = tmpMask[i, j];
-                                                                                for (int k = 0; k < bandsCount; k++)
+                                                                                for (int k = 0; k < settings.BandsCount; k++)
                                                                                 {
                                                                                     var index = i * tileSize + j + k * tileSize * tileSize;
                                                                                     mainTileData[index] = tmpTileData[index];
@@ -551,7 +622,7 @@ internal partial class Program
                                                 }
                                                 lock (mosaicRgb)
                                                 {
-                                                    mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                                    mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                                     mosaicRgb.FlushCache();
                                                 }
                                             }
@@ -578,19 +649,22 @@ internal partial class Program
                     if (!finallyProcessed)
                         AnsiConsole.Write("Облачные тайлы не удалось заменить полностью");
                 }
+                timer.Stop();
+                spendTimeForReplaceClouds = timer.Elapsed;
             }
-            else
+            else if (settings.Format is "png")
             {
+                var timer = new Stopwatch();
                 GdalBase.ConfigureAll();
                 Gdal.AllRegister();
                 var geoTiffDriver = Gdal.GetDriverByName("GTiff");
                 File.Delete(settings.ResFileName);
-                var mosaicRgb = geoTiffDriver.Create(settings.ResFileName, resHorSize, resVerSize, bandsCount, DataType.GDT_Byte, null);
+                var mosaicRgb = geoTiffDriver.Create(settings.ResFileName, resHorSize, resVerSize, settings.BandsCount, DataType.GDT_Byte, null);
                 mosaicRgb.SetProjection(
                     "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
                 mosaicRgb.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                 mosaicRgb.Dispose();
-                var bands = Enumerable.Range(1, bandsCount + 1).ToArray();
+                var bands = Enumerable.Range(1, settings.BandsCount + 1).ToArray();
                 var ext = "png";
 
                 var processed = 0;
@@ -615,7 +689,7 @@ internal partial class Program
                                 tiles.Add(x);
                             }
 
-                            var buffer = new byte[bandsCount * tileSize * tileSize * (xMax - xMin + 1)];
+                            var buffer = new byte[settings.BandsCount * tileSize * tileSize * (xMax - xMin + 1)];
 
                             var y1 = y;
                             Parallel.ForEach(tiles, (x, _) =>
@@ -628,15 +702,15 @@ internal partial class Program
                                     if (File.Exists(filePath))
                                     {
                                         var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                        var tileData = new byte[bandsCount * tileSize * tileSize];
-                                        tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                        var tileData = new byte[settings.BandsCount * tileSize * tileSize];
+                                        tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                         tile.Dispose();
                                         File.Delete(filePath);
 
                                         lock (buffer)
                                         {
                                             var shift = (x - xMin) * tileSize;
-                                            for (var k = 0; k < bandsCount; k++)
+                                            for (var k = 0; k < settings.BandsCount; k++)
                                                 for (var i = 0; i < tileSize; i++)
                                                     for (var j = 0; j < tileSize; j++)
                                                     {
@@ -672,7 +746,7 @@ internal partial class Program
 
                             mosaicRgb.WriteRaster(0, (y - yMin) * tileSize, tileSize * (xMax - xMin + 1), tileSize, buffer,
                                 tileSize * (xMax - xMin + 1),
-                                tileSize, bandsCount, bands, 0, 0, 0);
+                                tileSize, settings.BandsCount, bands, 0, 0, 0);
                             mosaicRgb.FlushCache();
                             mosaicRgb.Dispose();
                         }
@@ -701,12 +775,12 @@ internal partial class Program
                                     if (File.Exists(filePath))
                                     {
                                         var tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                        var tileData = new byte[bandsCount * tileSize * tileSize];
-                                        tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                        var tileData = new byte[settings.BandsCount * tileSize * tileSize];
+                                        tile.ReadRaster(0, 0, tileSize, tileSize, tileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                         tile.Dispose();
                                         File.Delete(filePath);
 
-                                        mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, tileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                        mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, tileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                     }
                                 }
                                 catch (Exception)
@@ -724,6 +798,9 @@ internal partial class Program
                     if (!finallyProcessed)
                         AnsiConsole.Write("Есть битые тайлы");
                 }
+                timer.Stop();
+                spendTimeForDownload = timer.Elapsed;
+                timer = new Stopwatch();
                 if (settings.EnableCloudDetection)
                 {
                     var finallyProcessed = true;
@@ -738,18 +815,18 @@ internal partial class Program
                         mosaicRgb = Gdal.Open(settings.ResFileName, Access.GA_Update);
                         if (settings.EnableMaskSaving)
                         {
-                            beforeOutputMask = geoTiffDriver.Create("BeforeMask.tif", resHorSize, resVerSize, 1, DataType.GDT_Byte, null);
+                            beforeOutputMask = geoTiffDriver.Create(settings.BeforeMaskName, resHorSize, resVerSize, 1, DataType.GDT_Byte, null);
                             beforeOutputMask.SetProjection(
         "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
                             beforeOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                             beforeOutputMask.Dispose();
-                            beforeOutputMask = Gdal.Open("BeforeMask.tif", Access.GA_Update);
-                            afterOutputMask = geoTiffDriver.Create("AfterMask.tif", resHorSize, resVerSize, 1, DataType.GDT_Byte, null);
+                            beforeOutputMask = Gdal.Open(settings.BeforeMaskName, Access.GA_Update);
+                            afterOutputMask = geoTiffDriver.Create(settings.AfterMaskName, resHorSize, resVerSize, 1, DataType.GDT_Byte, null);
                             afterOutputMask.SetProjection(
         "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER[\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\",\"9001\"]],AXIS[\"Easting\",EAST],AXIS[\"Northing\",NORTH],EXTENSION[\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]");
                             afterOutputMask.SetGeoTransform([startPoint.x, resolution, 0, startPoint.y, 0, -resolution]);
                             afterOutputMask.Dispose();
-                            afterOutputMask = Gdal.Open("AfterMask.tif", Access.GA_Update);
+                            afterOutputMask = Gdal.Open(settings.AfterMaskName, Access.GA_Update);
                         }
 
                         for (var y = yMin; y <= yMax; y++)
@@ -764,7 +841,7 @@ internal partial class Program
                             _ = Parallel.ForEach(tiles, (x, _) =>
                             {
                                 var input = new DenseTensor<float>([1, 3, 512, 512]);
-                                var urlRGB16 = string.Format(urlTemplates["RGB16"], planetaryComputerKey, settings.Zoom, x, y1);
+                                var urlRGB16 = string.Format(urlTemplates["RGB16"]["UrlTemplate"], planetaryComputerKey, settings.Zoom, x, y1);
                                 while (true)
                                 {
                                     try
@@ -801,10 +878,10 @@ internal partial class Program
                                             if (cloudPercent > cloudPercentLimit)
                                             {
                                                 var tileIndex = new Tuple<int, int>(x, y1);
-                                                var mainTileData = new byte[bandsCount * tileSize * tileSize];
+                                                var mainTileData = new byte[settings.BandsCount * tileSize * tileSize];
                                                 lock (mosaicRgb)
                                                 {
-                                                    mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                                    mosaicRgb.ReadRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                                 }
                                                 for (var k = 0; k < 3; k++)
                                                     for (var i = 0; i < tileSize; i++)
@@ -822,7 +899,7 @@ internal partial class Program
                                                     {
                                                         DateTime endSearchDate = startSearchDate.AddDays(dayStep);
                                                         var tmpPlanetaryComputerKey = GetPlanetaryComputerKey(settings.DataType, startSearchDate, endSearchDate, 100).Result;
-                                                        urlRGB16 = string.Format(urlTemplates["RGB16"], tmpPlanetaryComputerKey, settings.Zoom, tileIndex.Item1, tileIndex.Item2);
+                                                        urlRGB16 = string.Format(urlTemplates["RGB16"]["UrlTemplate"], tmpPlanetaryComputerKey, settings.Zoom, tileIndex.Item1, tileIndex.Item2);
                                                         var url = string.Format(settings.UrlTemplate, tmpPlanetaryComputerKey, settings.Zoom, tileIndex.Item1, tileIndex.Item2);
 
                                                         filePath = $"{tileIndex.Item1}_{tileIndex.Item2}.tif";
@@ -853,8 +930,8 @@ internal partial class Program
                                                         if (!File.Exists(filePath))
                                                             continue;
                                                         tile = Gdal.Open(filePath, Access.GA_ReadOnly);
-                                                        var tmpTileData = new byte[bandsCount * tileSize * tileSize];
-                                                        tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                                        var tmpTileData = new byte[settings.BandsCount * tileSize * tileSize];
+                                                        tile.ReadRaster(0, 0, tileSize, tileSize, tmpTileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                                         tile.Dispose();
                                                         File.Delete(filePath);
 
@@ -871,7 +948,7 @@ internal partial class Program
                                                                     if (tmpTileDataRGB16[i * tileSize + j + alphaChannel] != 0)
                                                                     {
                                                                         mainMask[i, j] = tmpMask[i, j];
-                                                                        for (int k = 0; k < bandsCount; k++)
+                                                                        for (int k = 0; k < settings.BandsCount; k++)
                                                                         {
                                                                             var index = i * tileSize + j + k * tileSize * tileSize;
                                                                             mainTileData[index] = tmpTileData[index];
@@ -900,7 +977,7 @@ internal partial class Program
                                                                             if (tmpMask[i, j] is 1)
                                                                             {
                                                                                 mainMask[i, j] = tmpMask[i, j];
-                                                                                for (int k = 0; k < bandsCount; k++)
+                                                                                for (int k = 0; k < settings.BandsCount; k++)
                                                                                 {
                                                                                     var index = i * tileSize + j + k * tileSize * tileSize;
                                                                                     mainTileData[index] = tmpTileData[index];
@@ -909,7 +986,7 @@ internal partial class Program
                                                                             else if (mainMask[i, j] is 4 && tmpMask[i, j] is 2 or 3)
                                                                             {
                                                                                 mainMask[i, j] = tmpMask[i, j];
-                                                                                for (int k = 0; k < bandsCount; k++)
+                                                                                for (int k = 0; k < settings.BandsCount; k++)
                                                                                 {
                                                                                     var index = i * tileSize + j + k * tileSize * tileSize;
                                                                                     mainTileData[index] = tmpTileData[index];
@@ -935,7 +1012,7 @@ internal partial class Program
                                                 }
                                                 lock (mosaicRgb)
                                                 {
-                                                    mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, bandsCount, bands, 0, 0, 0);
+                                                    mosaicRgb.WriteRaster((tileIndex.Item1 - xMin) * tileSize, (tileIndex.Item2 - yMin) * tileSize, tileSize, tileSize, mainTileData, tileSize, tileSize, settings.BandsCount, bands, 0, 0, 0);
                                                     mosaicRgb.FlushCache();
                                                 }
                                             }
@@ -962,8 +1039,15 @@ internal partial class Program
                     if (!finallyProcessed)
                         AnsiConsole.Write("Облачные тайлы не удалось заменить полностью");
                 }
+                timer.Stop();
+                spendTimeForReplaceClouds = timer.Elapsed;
             }
+            else
+                Console.WriteLine("Неизвестный формат тайлов.");
 
+            log += $"Время загрузки снимка: {spendTimeForDownload}\n";
+            log += $"Время замены облачности: {spendTimeForReplaceClouds}\n";
+            File.WriteAllText(settings.LogName, log);
             if (settings.EnableMaskSaving)
             {
                 beforeOutputMask.Dispose();
@@ -1277,8 +1361,8 @@ internal partial class Program
 
     struct Settings
     {
-        public string Region, DataType, UrlTemplate, ResFileName;
-        public int Zoom, Clouds;
+        public string Region, DataType, UrlTemplate, ResFileName, BeforeMaskName, AfterMaskName, LogName, Format;
+        public int Zoom, Clouds, BandsCount;
         public double LonMin, LonMax, LatMin, LatMax;
         public bool EnableCloudDetection, EnableMaskSaving;
         public DateTime StartDate, EndDate;
@@ -1288,8 +1372,13 @@ internal partial class Program
             DataType = "";
             UrlTemplate = "";
             ResFileName = "";
+            BeforeMaskName = "";
+            AfterMaskName = "";
+            LogName = "";
+            Format = "";
             Zoom = 0;
             Clouds = 0;
+            BandsCount = 0;
             LonMin = 0;
             LatMax = 0;
             LatMin = 0;
